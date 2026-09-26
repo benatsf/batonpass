@@ -1,0 +1,64 @@
+{
+  "date": "2026-09-26",
+  "answerCommand": "claude -p --no-session-persistence --model haiku",
+  "cases": 8,
+  "probes": 64,
+  "rows": [
+    {
+      "strategy": "no-context",
+      "status": "ok",
+      "probes": 64,
+      "passBrief": 0,
+      "passSearch": 45,
+      "recallBrief": 0,
+      "recallSearch": 0.703125,
+      "briefTokens": 0,
+      "refreshMs": 25,
+      "jevInputTokens": 0,
+      "costUsd": 0,
+      "answerErrors": 0
+    },
+    {
+      "strategy": "recent-dialogue",
+      "status": "ok",
+      "probes": 64,
+      "passBrief": 46,
+      "passSearch": 61,
+      "recallBrief": 0.71875,
+      "recallSearch": 0.953125,
+      "briefTokens": 1497,
+      "refreshMs": 22,
+      "jevInputTokens": 0,
+      "costUsd": 0,
+      "answerErrors": 0
+    },
+    {
+      "strategy": "jev-select",
+      "status": "skipped:no-key",
+      "probes": 64,
+      "passBrief": 0,
+      "passSearch": 0,
+      "recallBrief": 0,
+      "recallSearch": 0,
+      "briefTokens": 0,
+      "refreshMs": 0,
+      "jevInputTokens": 0,
+      "costUsd": 0,
+      "answerErrors": 0
+    },
+    {
+      "strategy": "jev-select+rules",
+      "status": "skipped:no-key",
+      "probes": 64,
+      "passBrief": 0,
+      "passSearch": 0,
+      "recallBrief": 0,
+      "recallSearch": 0,
+      "briefTokens": 0,
+      "refreshMs": 0,
+      "jevInputTokens": 0,
+      "costUsd": 0,
+      "answerErrors": 0
+    }
+  ]
+}

@@ -68,7 +68,15 @@ rules = false
 
 ## Evaluation
 
-`baton eval` rebuilds 8 synthetic multi-session histories (Codex and Claude Code mixed), renders the brief with each strategy, and asks a fresh `claude -p` session 64 questions about decisions, constraints, identifiers, verified results and open items: once from the brief alone, once with one `baton search`. The latest scorecard is in [evals/results](evals/results). A release ships only when the default strategy is at least as good as `recent-dialogue` on both measures.
+`baton eval` rebuilds 8 synthetic multi-session histories (Codex and Claude Code mixed), renders the brief with each strategy, and asks a fresh `claude -p` session 64 questions about decisions, constraints, identifiers, verified results and open items: once from the brief alone, once with one `baton search`. Latest scorecard ([evals/results](evals/results/SCORECARD-2026-09-26.md), answered by Claude Haiku through `claude -p`):
+
+| Strategy | Recall, brief only | Recall, brief + one search | Brief tokens (avg) |
+| --- | --- | --- | --- |
+| no context | 0.0% (0/64) | 70.3% (45/64) | 0 |
+| `recent-dialogue` (default) | 71.9% (46/64) | 95.3% (61/64) | 1,497 |
+| `jev-select` | not yet measured (needs a TypeSafe key) | | |
+
+A release ships only when the default strategy is at least as good as `recent-dialogue` on both measures, beats having no context, and the run had no failed answers.
 
 ## Supported transcripts
 
