@@ -21,7 +21,20 @@ export interface CliIO {
   spawn(cmd: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }): Promise<number>;
 }
 
+let stdoutGuarded = false;
+
+/** A reader that stops early (`baton status | head`) closes the pipe; that is not an error. */
+function guardStdout(): void {
+  if (stdoutGuarded) return;
+  stdoutGuarded = true;
+  process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EPIPE') process.exit(0);
+    throw error;
+  });
+}
+
 export function defaultIO(): CliIO {
+  guardStdout();
   return {
     out: (text) => void process.stdout.write(text),
     err: (text) => void process.stderr.write(text),
