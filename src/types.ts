@@ -59,3 +59,9 @@ export interface SourceReader {
   parse(line: string, state: ParseState): BatonEvent[];
   sessionTitles?(): Map<string, string>;
 }
+
+export interface ProjectRef {
+  id: string;
+  root: string | null;
+  kind: 'remote' | 'alias' | 'path';
+}
