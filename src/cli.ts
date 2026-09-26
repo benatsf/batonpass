@@ -1,9 +1,12 @@
 import { spawn as spawnProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { doctor, ingestCommand, note, resume, search, show, status, type Command } from './commands.ts';
-import { ensureHome, loadConfig } from './config.ts';
+import { defaultConfig, ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
+import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATEGIES, writeScorecard, type Strategy } from './eval.ts';
 import { runHook } from './hooks.ts';
 import { applyPlan, defaultCommand, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
 
@@ -90,6 +93,39 @@ function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
   return 0;
 }
 
+async function evalCommand(args: string[], io: CliIO): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: { strategy: { type: 'string', multiple: true }, fixtures: { type: 'string' }, out: { type: 'string' }, concurrency: { type: 'string' } },
+  });
+  if (io.env.BATON_HOOK === '1') {
+    io.err('baton eval is disabled inside an agent started by baton (BATON_HOOK=1).\n');
+    return 1;
+  }
+  const strategies = (values.strategy ?? STRATEGIES) as Strategy[];
+  const unknown = strategies.filter((s) => !STRATEGIES.includes(s));
+  if (unknown.length) {
+    io.err(`Unknown strategy: ${unknown.join(', ')}. Choose from ${STRATEGIES.join(', ')}.\n`);
+    return 2;
+  }
+  const config = loadConfig(io.env);
+  ensureHome(config.home);
+  const cases = loadCases(values.fixtures ?? CASES_DIR);
+  const answer = commandAnswerer(config.eval.answerCommand, io.env, mkdtempSync(join(tmpdir(), 'baton-eval-answers-')));
+  const card = await runEval({
+    cases,
+    strategies,
+    answer,
+    answerCommand: config.eval.answerCommand.join(' '),
+    env: io.env,
+    concurrency: Number(values.concurrency ?? 4) || 4,
+  });
+  const written = writeScorecard(card, values.out ?? join(config.home, 'evals'));
+  io.out(renderScorecard(card, defaultConfig(config.home, io.env).select.strategy));
+  io.out(`\nWrote ${written.markdown}\n`);
+  return 0;
+}
+
 const USAGE = `Usage: baton <command> [options]
 
 Commands:
@@ -120,6 +156,13 @@ export async function main(argv: string[], io: CliIO = defaultIO(), makeContext:
       return 0;
     case 'hook':
       return hookCommand(rest, io, makeContext);
+    case 'eval':
+      try {
+        return await evalCommand(rest, io);
+      } catch (error) {
+        io.err(`${error instanceof Error ? error.message : String(error)}\n`);
+        return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
+      }
     case 'install':
     case 'uninstall':
       try {

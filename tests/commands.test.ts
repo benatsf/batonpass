@@ -144,3 +144,12 @@ test('doctor --jev without a key reports the missing key and fails', async () =>
   assert.equal(await t.run(['doctor', '--jev']), 1);
   assert.match(t.out(), /^✗ Jev live check: no key in TYPESAFE_API_KEY$/m);
 });
+
+test('eval rejects unknown strategies and refuses inside a baton-started agent', async () => {
+  const t = setup();
+  assert.equal(await t.run(['eval', '--strategy', 'bogus']), 2);
+  assert.match(t.io.stderr.join(''), /Unknown strategy: bogus\. Choose from no-context, recent-dialogue, jev-select, jev-select\+rules\./);
+  const inert = setup({ BATON_HOOK: '1' });
+  assert.equal(await inert.run(['eval']), 1);
+  assert.match(inert.io.stderr.join(''), /baton eval is disabled inside an agent started by baton/);
+});

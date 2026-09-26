@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "In which language should the agent answer the user in this project?", "answer": "French", "accept": ["français"] },
+  { "id": "p2", "kind": "constraint", "question": "What must never be disabled on any table?", "answer": "row level security", "accept": ["RLS"] },
+  { "id": "p3", "kind": "identifier", "question": "Which function leaked private profile columns?", "answer": "get_public_profile" },
+  { "id": "p4", "kind": "identifier", "question": "Which private columns did that function leak?", "answer": "email stripe_customer_id" },
+  { "id": "p5", "kind": "identifier", "question": "Which migration fixed the leaking function?", "answer": "20260921_fix_public_profile" },
+  { "id": "p6", "kind": "open", "question": "Is leaked-password protection enabled?", "answer": "still off", "accept": ["not enabled", "not yet", "disabled"] },
+  { "id": "p7", "kind": "open", "question": "Where has the service role key been rotated so far?", "answer": "staging only", "accept": ["only on staging", "only staging"] },
+  { "id": "p8", "kind": "verified", "question": "How many advisor warnings are resolved?", "answer": "14 of 16", "accept": ["14 out of 16", "14/16"] }
+]

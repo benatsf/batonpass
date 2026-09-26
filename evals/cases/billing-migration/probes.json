@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "What must the agent do before running any migration against production?", "answer": "ask first", "accept": ["ask you", "ask me", "ask the user", "approval", "permission"] },
+  { "id": "p2", "kind": "identifier", "question": "Which table and column hold the Stripe price of each plan?", "answer": "billing_plans stripe_price_id" },
+  { "id": "p3", "kind": "identifier", "question": "What is the number of the pull request for the portal function?", "answer": "212" },
+  { "id": "p4", "kind": "verified", "question": "Why did the e2e job fail on the portal pull request?", "answer": "timed out on checkout-return", "accept": ["checkout-return timeout", "timeout on checkout-return", "checkout return timed out"] },
+  { "id": "p5", "kind": "verified", "question": "Which Playwright timeout made the e2e job pass?", "answer": "60 seconds", "accept": ["60 s", "60s", "60000 ms", "one minute"] },
+  { "id": "p6", "kind": "identifier", "question": "Which version of create-portal-session runs on staging?", "answer": "version 7", "accept": ["v7"] },
+  { "id": "p7", "kind": "open", "question": "What billing work is left?", "answer": "3 legacy annual plans", "accept": ["three legacy annual plans"] },
+  { "id": "p8", "kind": "constraint", "question": "Is the portal function deployed to production?", "answer": "production is untouched", "accept": ["not deployed to production", "staging only", "only on staging", "only staging", "not in production"] }
+]
