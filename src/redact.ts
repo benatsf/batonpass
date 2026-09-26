@@ -21,10 +21,19 @@ export function shannonEntropy(value: string): number {
 const PUBLIC_IDENTIFIER =
   /^(?:[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:price|prod|cus|sub|pi|in|sb_publishable)_[A-Za-z0-9_]+)$/i;
 
+/** Bumped whenever a rule changes, so existing ledgers are redacted again. */
+export const REDACTOR_VERSION = 2;
+
+const SECRET_NAME = '(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)';
+/** Values that name a secret rather than hold one: $VAR, ${VAR}, process.env.X, <placeholder>. */
+const REFERENCE = /^(?:\$|\[REDACTED:|process\.env\.|os\.environ|env\.|<)/;
+const keepValue = (value: string | undefined) => !value || REFERENCE.test(value) || /^\d+$/.test(value);
+
 const rule = (name: string, pattern: RegExp, replacer?: Replacer): Rule => ({ name, pattern, replacer });
 
 const RULES: Rule[] = [
-  rule('private_key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g),
+  // An unterminated block (a truncated paste) is redacted through to the end of the text.
+  rule('private_key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g),
   rule('url_credentials', /\b([a-z][a-z0-9+.-]*:\/\/)[^\s:@/]+:[^\s@/]+@/gi, (_m, g) => `${g[0]}[REDACTED:url_credentials]@`),
   rule('stripe_secret', /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}/g),
   rule('stripe_webhook_secret', /\bwhsec_[A-Za-z0-9]{16,}/g),
@@ -38,14 +47,22 @@ const RULES: Rule[] = [
   rule('slack_token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/g),
   rule('jwt', /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g),
   rule('bearer', /\b(Bearer)\s+(?!\[REDACTED:)[A-Za-z0-9._~+/=-]{20,}/g, (_m, g) => `${g[0]} [REDACTED:bearer]`),
+  // NAME=value, "name": "value", name = 'value', --name=value, where NAME contains a secret word
+  // anywhere in an identifier (DATABASE_PASSWORD, stripeApiKey, --with-token).
   rule(
     'assignment',
-    /\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)(\s*[:=]\s*)(["']?)([^\s"'&,;]{6,})\3/gi,
-    (_m, g) => (g[3]?.startsWith('[REDACTED:') || /^\d+$/.test(g[3] ?? '') ? null : `${g[0]}${g[1]}${g[2]}[REDACTED:assignment]${g[2]}`),
+    new RegExp(`(?<![A-Za-z0-9_-])([A-Za-z0-9_-]*?${SECRET_NAME}[A-Za-z0-9_-]*)(["']?\\s*[:=]\\s*)(["']?)([^\\s"'&,;]{6,})\\3`, 'gi'),
+    (_m, g) => (keepValue(g[3]) ? null : `${g[0]}${g[1]}${g[2]}[REDACTED:assignment]${g[2]}`),
+  ),
+  // Command-line flags followed by a space: --password value.
+  rule(
+    'assignment',
+    new RegExp(`(?<![A-Za-z0-9_-])(--?[A-Za-z0-9-]*?${SECRET_NAME}[A-Za-z0-9-]*)(\\s+)(["']?)([^\\s"'&,;]{6,})\\3`, 'gi'),
+    (_m, g) => (keepValue(g[3]) ? null : `${g[0]}${g[1]}${g[2]}[REDACTED:assignment]${g[2]}`),
   ),
   rule(
     'high_entropy',
-    /\b((?:key|token|secret|password|bearer|credential)s?)\b([^\n]{0,40}?)([A-Za-z0-9_\-+/=]{32,})/gi,
+    /(?<![A-Za-z0-9])((?:key|token|secret|password|bearer|credential)s?)(?![a-z])([^\n]{0,40}?)([A-Za-z0-9_\-+/=]{32,})/gi,
     (_m, g) => {
       const candidate = g[2] ?? '';
       if (PUBLIC_IDENTIFIER.test(candidate) || shannonEntropy(candidate) < 4.0) return null;

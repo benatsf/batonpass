@@ -8,6 +8,7 @@ import { ensureHome, loadConfig } from './config.ts';
 import { collectFacts } from './facts.ts';
 import { Ledger } from './ledger.ts';
 import { createResolver } from './project.ts';
+import { redact, REDACTOR_VERSION } from './redact.ts';
 import { createClaudeReader } from './readers/claude.ts';
 import { createCodexReader } from './readers/codex.ts';
 import { recentSelector, type RefreshDeps } from './snapshot.ts';
@@ -45,6 +46,8 @@ export function createContext(env: NodeJS.ProcessEnv = process.env, overrides: P
   const config = loadConfig(env);
   ensureHome(config.home);
   const ledger = new Ledger(join(config.home, 'baton.db'));
+  // A ledger written before a redaction rule changed is scrubbed again, once.
+  ledger.reRedact(REDACTOR_VERSION, (text) => redact(text).text);
   return {
     env,
     config,

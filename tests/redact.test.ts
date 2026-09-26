@@ -80,3 +80,29 @@ test('shannonEntropy distinguishes random from repetitive text', () => {
   assert.ok(shannonEntropy('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') < 1);
   assert.ok(shannonEntropy('Qx7Lp2Zr9Vt4Kw8Mn3Bs6Hy1Jd5Fg0Ce') > 4);
 });
+
+test('redacts env-style, JSON, camelCase and command-line secret assignments', () => {
+  const pw = 'Xk9' + 'mQ2vLp7w';
+  const lines: Array<[string, string]> = [
+    ['DATABASE_PASSWORD=' + pw, 'DATABASE_PASSWORD=[REDACTED:assignment]'],
+    ['export NEXTAUTH_SECRET=' + body(32), 'export NEXTAUTH_SECRET=[REDACTED:assignment]'],
+    ['TYPESAFE_API_KEY=' + body(24), 'TYPESAFE_API_KEY=[REDACTED:assignment]'],
+    ['{"password": "' + pw + '"}', '{"password": "[REDACTED:assignment]"}'],
+    ['const stripeApiKey = "' + body(20) + '";', 'const stripeApiKey = "[REDACTED:assignment]";'],
+    ['supabase link --password ' + pw, 'supabase link --password [REDACTED:assignment]'],
+    ['gh auth login --with-token=' + body(20), 'gh auth login --with-token=[REDACTED:assignment]'],
+  ];
+  for (const [input, expected] of lines) assert.equal(redact(input).text, expected, input);
+});
+
+test('keeps variable references and ordinary words next to secret names', () => {
+  for (const line of ['DATABASE_PASSWORD=$DATABASE_PASSWORD', 'apiKey: process.env.API_KEY', 'token=${TOKEN}', 'the token rotated successfully', 'max_tokens: 2000']) {
+    assert.equal(redact(line).text, line);
+  }
+});
+
+test('redacts a private key block that was cut before its END line', () => {
+  const cut = '-----BEGIN ' + 'OPENSSH PRIVATE KEY-----\n' + body(64) + '\n' + body(64);
+  const { text } = redact(`Write key.pem ${cut}`);
+  assert.equal(text, 'Write key.pem [REDACTED:private_key]');
+});

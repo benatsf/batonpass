@@ -108,3 +108,28 @@ test('concurrent writers produce unique, gap-free snapshot sequence numbers', as
   const seqs = (ledger.db.prepare('SELECT seq FROM snapshots ORDER BY seq').all() as Array<{ seq: number }>).map((r) => r.seq);
   assert.deepEqual(seqs, Array.from({ length: 100 }, (_, i) => i + 1));
 });
+
+test('reRedact rewrites stored text once per redactor version and keeps search in sync', () => {
+  const ledger = new Ledger(dbPath());
+  const leaked = 'hunter2' + 'hunter2';
+  ledger.insertEvent('p', ev({ text: `DB_PASSWORD=${leaked}`, meta: { input: `x ${leaked}` } }));
+  ledger.addNote('p', `note ${leaked}`, '2026-09-26T10:00:00Z');
+  ledger.commitSnapshot('p', () => ({ createdAt: 'x', covers: [], brief: `brief ${leaked}`, full: `full ${leaked}`, stats: {} }));
+  const scrub = (text: string) => text.replaceAll(leaked, '[REDACTED:assignment]');
+  assert.equal(ledger.reRedact(2, scrub), true);
+  assert.equal(ledger.reRedact(2, scrub), false);
+  assert.equal(ledger.events('p')[0]!.text, 'DB_PASSWORD=[REDACTED:assignment]');
+  assert.deepEqual(ledger.events('p')[0]!.meta, { input: 'x [REDACTED:assignment]' });
+  assert.equal(ledger.notes('p')[0]!.text, 'note [REDACTED:assignment]');
+  assert.equal(ledger.latestSnapshot('p')!.brief, 'brief [REDACTED:assignment]');
+  assert.equal(ledger.search('p', leaked).length, 0);
+  assert.equal(ledger.search('p', 'DB_PASSWORD').length, 1);
+});
+
+test('refuses a ledger written by a newer batonpass', () => {
+  const path = dbPath();
+  const old = new Ledger(path);
+  old.db.exec('PRAGMA user_version = 99');
+  old.close();
+  assert.throws(() => new Ledger(path), /newer batonpass/);
+});

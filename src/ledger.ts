@@ -45,7 +45,7 @@ export interface ProjectSummary {
 
 export type SnapshotBody = Omit<Snapshot, 'projectId' | 'seq'>;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources (
   path TEXT PRIMARY KEY, tool TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL,
@@ -68,6 +68,9 @@ CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
   INSERT INTO events_fts(rowid, text) VALUES (new.id, new.text); END;
 CREATE TRIGGER IF NOT EXISTS events_ad AFTER DELETE ON events BEGIN
   INSERT INTO events_fts(events_fts, rowid, text) VALUES ('delete', old.id, old.text); END;
+CREATE TRIGGER IF NOT EXISTS events_au AFTER UPDATE OF text ON events BEGIN
+  INSERT INTO events_fts(events_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO events_fts(rowid, text) VALUES (new.id, new.text); END;
 CREATE TABLE IF NOT EXISTS scores (
   project_id TEXT NOT NULL, item_key TEXT NOT NULL, model TEXT NOT NULL, question TEXT NOT NULL,
   score REAL NOT NULL, decided_at TEXT NOT NULL, PRIMARY KEY (project_id, item_key, model, question));
@@ -77,6 +80,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
 CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, project_id TEXT NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS jev_spend (day TEXT PRIMARY KEY, input_tokens INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS redactions (rule TEXT PRIMARY KEY, count INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
 type Row = Record<string, unknown>;
@@ -109,6 +113,10 @@ export class Ledger {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     const version = Number((this.db.prepare('PRAGMA user_version').get() as Row).user_version);
+    if (version > SCHEMA_VERSION) {
+      this.db.close();
+      throw new Error(`${path} was written by a newer batonpass (schema ${version}); upgrade batonpass`);
+    }
     if (version < SCHEMA_VERSION) {
       this.transaction(() => {
         this.db.exec(SCHEMA);
@@ -126,6 +134,36 @@ export class Ledger {
 
   close(): void {
     this.db.close();
+  }
+
+  /** Applies `scrub` to every stored text once per redactor version. Returns whether it ran. */
+  reRedact(version: number, scrub: (text: string) => string): boolean {
+    const current = this.db.prepare("SELECT value FROM meta WHERE key = 'redactor_version'").get() as Row | undefined;
+    if (current && Number(current.value) >= version) return false;
+    const deep = (value: unknown): unknown =>
+      typeof value === 'string' ? scrub(value)
+        : Array.isArray(value) ? value.map(deep)
+        : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, deep(v)]))
+        : value;
+    const rewrite = (table: string, key: string, columns: string[], json: string[] = []) => {
+      const update = this.db.prepare(`UPDATE ${table} SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE ${key} = ?`);
+      for (const row of this.db.prepare(`SELECT ${key} AS k, ${columns.join(', ')} FROM ${table}`).all() as Row[]) {
+        const next = columns.map((c) => {
+          const value = row[c];
+          if (typeof value !== 'string') return value as string | null;
+          return json.includes(c) ? JSON.stringify(deep(JSON.parse(value))) : scrub(value);
+        });
+        if (next.some((v, i) => v !== row[columns[i]!])) update.run(...(next as Array<string | null>), row.k as number | string);
+      }
+    };
+    this.transaction(() => {
+      rewrite('events', 'id', ['text', 'meta_json'], ['meta_json']);
+      rewrite('notes', 'id', ['text']);
+      rewrite('sessions', 'rowid', ['title']);
+      rewrite('snapshots', 'rowid', ['brief_md', 'full_md', 'covers_json'], ['covers_json']);
+      this.db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('redactor_version', ?)").run(String(version));
+    });
+    return true;
   }
 
   transaction<T>(fn: () => T): T {
