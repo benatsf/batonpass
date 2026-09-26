@@ -65,3 +65,21 @@ export interface ProjectRef {
   root: string | null;
   kind: 'remote' | 'alias' | 'path';
 }
+
+export interface PrFact {
+  number: number;
+  title: string;
+  isDraft: boolean;
+  checks: string;
+}
+
+export interface RepoFacts {
+  branch: string | null;
+  head: string | null;
+  subject: string | null;
+  ahead: number | null;
+  behind: number | null;
+  changedFiles: number | null;
+  recentCommits: string[];
+  openPrs: PrFact[] | null;
+}
