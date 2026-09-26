@@ -102,8 +102,12 @@ export function createCodexReader(codexHome: string): SourceReader {
         }
         case 'response_item': {
           if (p.type === 'message' && p.role === 'user') {
-            const text = unwrapUserText(contentText(p.content, 'input_text'));
-            return text ? event('user', text) : [];
+            const raw = contentText(p.content, 'input_text');
+            const text = unwrapUserText(raw);
+            if (text) return event('user', text);
+            // An image-only prompt still starts a turn, so its reply stays with it.
+            const image = Array.isArray(p.content) && p.content.some((c) => isObject(c) && c.type === 'input_image');
+            return image && !raw.trim() ? event('user', '[image]') : [];
           }
           if (p.type === 'function_call' || p.type === 'custom_tool_call') {
             const name = str(p.name) ?? 'tool';

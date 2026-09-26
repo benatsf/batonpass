@@ -61,7 +61,16 @@ export function createClaudeReader(projectsDir: string): SourceReader {
           if (o.isMeta === true || o.sourceToolUseID || o.toolUseResult !== undefined) return [];
           if (blocks(message.content).some((b) => b.type === 'tool_result')) return [];
           const text = textOf(message.content).trim();
-          if (!text || IGNORED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return [];
+          // A slash command is real user input: it starts a turn, so its reply is not
+          // attributed to the previous prompt.
+          const command = /<command-name>([^<]*)<\/command-name>/.exec(text);
+          if (command) {
+            const name = command[1]!.trim();
+            const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? '';
+            return event('user', `${name.startsWith('/') ? name : `/${name}`}${args ? ` ${args}` : ''}`);
+          }
+          if (!text) return blocks(message.content).some((b) => b.type === 'image') ? event('user', '[image]') : [];
+          if (IGNORED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return [];
           return event('user', text);
         }
         case 'assistant': {

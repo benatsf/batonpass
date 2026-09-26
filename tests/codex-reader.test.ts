@@ -79,3 +79,10 @@ test('reports a working-directory change', () => {
   assert.deepEqual(events.map((e) => [e.kind, e.text]), [['cwd_change', '/work/web/apps/api']]);
   assert.equal(state.cwd, '/work/web/apps/api');
 });
+
+test('an image-only prompt still starts a turn', () => {
+  const reader = createCodexReader('/nonexistent');
+  const state = { sessionId: ID, cwd: '/work/web' };
+  const line = JSON.stringify({ timestamp: '2026-09-26T12:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] } });
+  assert.deepEqual(reader.parse(line, state).map((e) => [e.kind, e.text]), [['user', '[image]']]);
+});

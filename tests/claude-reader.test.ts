@@ -57,7 +57,7 @@ test('emits titles, PR links and compaction summaries', () => {
   assert.ok(events.every((e) => e.sessionId === session.id && e.tool === 'claude'));
 });
 
-test('follows relocation and per-line cwd, skips sidechains and slash-command echoes', () => {
+test('follows relocation and per-line cwd, skips sidechains and command output, keeps slash commands as turns', () => {
   const reader = createClaudeReader('/nonexistent');
   const state = { sessionId: 's1', cwd: null };
   const moved = reader.parse(JSON.stringify({ type: 'relocated', relocatedCwd: '/work/api', sessionId: 's1' }), state);
@@ -66,5 +66,26 @@ test('follows relocation and per-line cwd, skips sidechains and slash-command ec
   const side = reader.parse(JSON.stringify({ type: 'user', isSidechain: true, sessionId: 's1', cwd: '/w', timestamp: '2026-09-26T00:00:00Z', message: { content: 'sub task' } }), state);
   assert.deepEqual(side, []);
   const slash = reader.parse(JSON.stringify({ type: 'user', sessionId: 's1', cwd: '/w', timestamp: '2026-09-26T00:00:00Z', message: { content: '<command-name>/mcp</command-name>' } }), state);
-  assert.deepEqual(slash, []);
+  assert.deepEqual(slash.map((e) => [e.kind, e.text]), [['user', '/mcp']]);
+  const output = reader.parse(JSON.stringify({ type: 'user', sessionId: 's1', cwd: '/w', timestamp: '2026-09-26T00:00:01Z', message: { content: '<local-command-stdout>ok</local-command-stdout>' } }), state);
+  assert.deepEqual(output, []);
+});
+
+test('a slash command starts its own turn, so replies stay with their prompt', async () => {
+  const { buildTurns } = await import('../src/select/dialogue.ts');
+  const reader = createClaudeReader('/nonexistent');
+  const state = { sessionId: 's', cwd: '/w' };
+  const base = { sessionId: 's', cwd: '/w', isSidechain: false };
+  const lines = [
+    { ...base, type: 'user', timestamp: '2026-09-26T10:00:00.000Z', message: { role: 'user', content: 'implement the retry helper' } },
+    { ...base, type: 'assistant', timestamp: '2026-09-26T10:01:00.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Retry helper added.' }] } },
+    { ...base, type: 'user', timestamp: '2026-09-26T10:02:00.000Z', message: { role: 'user', content: '<command-message>review is running…</command-message>\n<command-name>/review</command-name>\n<command-args>src/retry.ts</command-args>' } },
+    { ...base, type: 'user', timestamp: '2026-09-26T10:02:01.000Z', message: { role: 'user', content: '<local-command-stdout>Total cost: $0.12</local-command-stdout>' } },
+    { ...base, type: 'assistant', timestamp: '2026-09-26T10:03:00.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Review: 3 critical bugs found.' }] } },
+  ];
+  const events = lines.flatMap((l, i) => reader.parse(JSON.stringify(l), state).map((e) => ({ ...e, id: i, projectId: 'p' })));
+  assert.deepEqual(buildTurns(events).map((t) => [t.user, t.reply]), [
+    ['implement the retry helper', 'Retry helper added.'],
+    ['/review src/retry.ts', 'Review: 3 critical bugs found.'],
+  ]);
 });
