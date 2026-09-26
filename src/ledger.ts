@@ -320,6 +320,7 @@ export class Ledger {
     const cutoff = new Date(now.getTime() - retentionDays * 86_400_000).toISOString();
     this.transaction(() => {
       this.db.prepare('DELETE FROM events WHERE ts < ?').run(cutoff);
+      this.db.prepare('DELETE FROM sessions WHERE last_ts < ?').run(cutoff);
       this.db
         .prepare(`DELETE FROM snapshots WHERE (project_id, seq) IN (
           SELECT project_id, seq FROM (SELECT project_id, seq, row_number() OVER (PARTITION BY project_id ORDER BY seq DESC) AS n FROM snapshots) WHERE n > ?)`)

@@ -89,6 +89,9 @@ test('prunes old events and surplus snapshots', () => {
   ledger.prune(new Date('2026-09-26T00:00:00Z'), 90, 2);
   assert.deepEqual(ledger.events('p').map((e) => e.text), ['new']);
   assert.equal(ledger.search('p', 'old').length, 0);
+  ledger.upsertSession('p', ev({ sessionId: 'old', ts: '2026-01-01T00:00:00.000Z' }), null);
+  ledger.prune(new Date('2026-09-26T00:00:00Z'), 90, 2);
+  assert.ok(!ledger.sessions('p').some((s) => s.sessionId === 'old'));
   assert.equal(ledger.latestSnapshot('p')?.seq, 5);
 });
 
