@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { JevClient } from 'fast-jev-compaction';
 import type { CliIO } from './cli.ts';
 import { staleSeconds, type Context } from './context.ts';
 import { ingest } from './ingest.ts';
@@ -190,8 +191,23 @@ export function doctorChecks(ctx: Context): Check[] {
   return checks;
 }
 
-export const doctor: Command = async (ctx, io) => {
+export const doctor: Command = async (ctx, io, args) => {
+  const { values } = parseArgs({ args, options: { jev: { type: 'boolean' } } });
   const checks = doctorChecks(ctx);
+  if (values.jev) {
+    const apiKey = ctx.env[ctx.config.jev.apiKeyEnv];
+    if (!apiKey) checks.push([false, `Jev live check: no key in ${ctx.config.jev.apiKeyEnv}`]);
+    else {
+      try {
+        await new JevClient({ apiKey, model: ctx.config.jev.model }).ask('batonpass connectivity check', {
+          ping: { type: 'noul', instructions: 'Is this state a connectivity check?' },
+        });
+        checks.push([true, `Jev reachable (model ${ctx.config.jev.model})`]);
+      } catch (error) {
+        checks.push([false, `Jev live check failed: ${error instanceof Error ? error.message : String(error)}`]);
+      }
+    }
+  }
   for (const [ok, text] of checks) io.out(`${ok === true ? '✓' : ok === false ? '✗' : '–'} ${text}\n`);
   return checks.some(([ok]) => ok === false) ? 1 : 0;
 };

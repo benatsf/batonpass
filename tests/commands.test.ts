@@ -138,3 +138,9 @@ test('an unknown option exits 2 with the parser message', async () => {
   assert.equal(await t.run(['show', '--bogus']), 2);
   assert.match(t.io.stderr.join(''), /Unknown option '--bogus'/);
 });
+
+test('doctor --jev without a key reports the missing key and fails', async () => {
+  const t = setup();
+  assert.equal(await t.run(['doctor', '--jev']), 1);
+  assert.match(t.out(), /^✗ Jev live check: no key in TYPESAFE_API_KEY$/m);
+});

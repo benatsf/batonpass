@@ -1,4 +1,8 @@
 import { appendFileSync, renameSync, statSync } from 'node:fs';
+import { JevClient } from 'fast-jev-compaction';
+import type { BatonConfig } from './config.ts';
+import { createJevSelector } from './select/jev.ts';
+import type { Selector } from './snapshot.ts';
 import { join } from 'node:path';
 import { ensureHome, loadConfig } from './config.ts';
 import { collectFacts } from './facts.ts';
@@ -26,6 +30,17 @@ function appendLog(home: string, event: string, detail: Record<string, unknown>)
   appendFileSync(path, `${new Date().toISOString()} ${event} ${JSON.stringify(detail)}\n`, { mode: 0o600 });
 }
 
+const JEV_TIMEOUT_MS = 20_000;
+
+export function chooseSelector(config: BatonConfig, env: NodeJS.ProcessEnv, ledger: Ledger): Selector {
+  if (config.select.strategy !== 'jev-select') return recentSelector;
+  const apiKey = env[config.jev.apiKeyEnv];
+  const asker = apiKey
+    ? new JevClient({ apiKey, model: config.jev.model, fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(JEV_TIMEOUT_MS) }) })
+    : null;
+  return createJevSelector({ asker, ledger });
+}
+
 export function createContext(env: NodeJS.ProcessEnv = process.env, overrides: Partial<Context> = {}): Context {
   const config = loadConfig(env);
   ensureHome(config.home);
@@ -38,7 +53,7 @@ export function createContext(env: NodeJS.ProcessEnv = process.env, overrides: P
     resolve: createResolver(config.aliases),
     now: () => new Date(),
     facts: (root) => collectFacts(root),
-    select: recentSelector,
+    select: chooseSelector(config, env, ledger),
     log: (event, detail = {}) => appendLog(config.home, event, detail),
     close: () => ledger.close(),
     ...overrides,
