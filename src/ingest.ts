@@ -22,6 +22,8 @@ export interface IngestReport {
 }
 
 const MAX_READ_BYTES = 256 * 1024 * 1024;
+const TOOL_CALL_CHARS = 300;
+const abbreviate = (value: string) => (value.length > TOOL_CALL_CHARS ? `${value.slice(0, TOOL_CALL_CHARS)}…` : value);
 
 function unchanged(prev: { cursor: Cursor } | null, file: SourceFile): boolean {
   if (!prev) return false;
@@ -102,6 +104,8 @@ function ingestFile(
       }
       const project = deps.resolve(event.cwd);
       const clean: BatonEvent = { ...event, text: redactValue(event.text, findings), meta: redactValue(event.meta, findings) };
+      // Shorten only after redaction, so a cut never splits a secret out of a rule's reach.
+      if (clean.kind === 'tool_call') clean.text = abbreviate(clean.text);
       if (ledger.insertEvent(project.id, clean)) {
         ledger.upsertSession(project.id, clean, file.path);
         report.events++;

@@ -47,7 +47,8 @@ function contentText(content: unknown, type: string): string {
     .join('\n');
 }
 
-const abbreviate = (value: string, max = 300) => (value.length > max ? `${value.slice(0, max)}…` : value);
+/** Bounds regex work on huge inputs; ingest redacts, then shortens to 300 characters. */
+const capInput = (value: string) => (value.length > 65_536 ? value.slice(0, 65_536) : value);
 
 export function createCodexReader(codexHome: string): SourceReader {
   return {
@@ -107,7 +108,7 @@ export function createCodexReader(codexHome: string): SourceReader {
           if (p.type === 'function_call' || p.type === 'custom_tool_call') {
             const name = str(p.name) ?? 'tool';
             const input = str(p.arguments) ?? str(p.input) ?? '';
-            return event('tool_call', abbreviate(`${name} ${input}`.trim()), { name });
+            return event('tool_call', capInput(`${name} ${input}`.trim()), { name });
           }
           return [];
         }

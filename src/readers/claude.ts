@@ -6,7 +6,8 @@ type Json = Record<string, unknown>;
 const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 const IGNORED_USER_PREFIXES = ['<baton-context', '<command-', '<local-command-', '[Request interrupted'];
-const abbreviate = (value: string, max = 300) => (value.length > max ? `${value.slice(0, max)}…` : value);
+/** Bounds regex work on huge inputs; ingest redacts, then shortens to 300 characters. */
+const capInput = (value: string) => (value.length > 65_536 ? value.slice(0, 65_536) : value);
 
 function blocks(content: unknown): Json[] {
   return Array.isArray(content) ? content.filter(isObject) : [];
@@ -71,7 +72,7 @@ export function createClaudeReader(projectsDir: string): SourceReader {
             } else if (block.type === 'tool_use') {
               const name = str(block.name) ?? 'tool';
               const input = isObject(block.input) ? (str(block.input.command) ?? JSON.stringify(block.input)) : '';
-              out.push(...event('tool_call', abbreviate(`${name} ${input}`.trim()), { name }));
+              out.push(...event('tool_call', capInput(`${name} ${input}`.trim()), { name }));
             }
           }
           return out;

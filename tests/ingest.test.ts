@@ -67,3 +67,15 @@ test('onlyPaths limits the run to the given transcripts', () => {
   assert.equal(report.files, 1);
   assert.deepEqual(env.deps.ledger.sessions(env.projectId).map((s) => s.tool), ['claude']);
 });
+
+test('tool inputs are redacted before they are shortened', () => {
+  const env = makeEnv();
+  const pw = 'Xk9' + 'mQ2vLp7w';
+  const input = `${'y'.repeat(272)} DATABASE_PASSWORD=${pw}`;
+  writeSession(env.root, { tool: 'codex', id: '0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d', cwd: env.repo, turns: [{ at: '2026-09-26T10:00:00.000Z', user: 'Run it.', reply: 'Done.', tools: [{ name: 'exec', input, output: '' }] }] });
+  ingest(env.deps);
+  const [call] = env.deps.ledger.events(env.projectId, ['tool_call']);
+  assert.ok(call);
+  assert.ok(!call.text.includes('Xk9m'), call.text.slice(-40));
+  assert.ok(call.text.length <= 301);
+});
