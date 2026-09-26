@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "What must not change without the user's approval?", "answer": "major version" },
+  { "id": "p2", "kind": "identifier", "question": "What is the app's bundle id?", "answer": "is.liink.app" },
+  { "id": "p3", "kind": "identifier", "question": "Which build number was first uploaded to TestFlight?", "answer": "412" },
+  { "id": "p4", "kind": "verified", "question": "Why did Apple reject the first submission?", "answer": "Sign in with Apple is missing", "accept": ["missing Sign in with Apple", "no Sign in with Apple"] },
+  { "id": "p5", "kind": "identifier", "question": "Which App Store guideline was cited?", "answer": "4.8" },
+  { "id": "p6", "kind": "identifier", "question": "Which build number was resubmitted?", "answer": "415" },
+  { "id": "p7", "kind": "open", "question": "What is the current review status?", "answer": "waiting for review", "accept": ["in review", "awaiting review"] },
+  { "id": "p8", "kind": "verified", "question": "What export compliance answer was given?", "answer": "no custom encryption" }
+]

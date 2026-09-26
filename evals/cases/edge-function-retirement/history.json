@@ -1,0 +1,28 @@
+{
+  "description": "Codex audits and retires edge functions; Claude Code verifies. Tests a rule, a path and a security explanation from the first session.",
+  "start": "2026-09-22T09:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "codex",
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "title": "Retire edge functions",
+      "goal": "Retire unused edge functions safely",
+      "turns": [
+        { "user": "Audit our Supabase edge functions and retire the unused ones. Rule: never delete a function outright; overwrite it with a 410 stub first so we can roll back.", "reply": "Agreed: every retired function gets a 410 stub first, no outright deletion. I found 23 deployed functions; 7 are unused and reachable with the public anon key." },
+        { "user": "Take a backup first.", "reply": "Saved exact JSON copies of all 23 functions to ~/backups/edge-2026-09-26/prod/ before touching anything." },
+        { "repeat": 12, "user": "Check the callers of function candidate {n}.", "reply": "Candidate {n} has no callers in the web app or the iOS app." },
+        { "user": "Why is the anon key enough to call them?", "reply": "Because the gateway verify_jwt check accepts the anon JWT; only an in-function auth.getUser call really requires a signed-in user." }
+      ]
+    },
+    {
+      "tool": "claude",
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "title": "Edge retirement follow-up",
+      "turns": [
+        { "user": "Continue the retirement. Which function was the riskiest?", "reply": "fetch-url-metadata was the riskiest: it allowed server-side request forgery. It now returns 410 like the other six." },
+        { "repeat": 10, "user": "Verify stub {n} returns 410.", "reply": "Stub {n} returns 410 Gone." },
+        { "user": "Anything still open?", "reply": "Open: delete the 12 retired functions from the dashboard, because the MCP server has no delete tool." }
+      ]
+    }
+  ]
+}

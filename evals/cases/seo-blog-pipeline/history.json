@@ -1,0 +1,36 @@
+{
+  "description": "Three sessions (Codex, Claude Code, Codex) on a blog publishing pipeline. Tests constraints set two sessions earlier.",
+  "start": "2026-09-16T09:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "codex",
+      "id": "e5f6a7b8-c9d0-4e1f-8a2b-4c5d6e7f8091",
+      "title": "Blog banner pipeline",
+      "goal": "Ship first-party blog banners",
+      "turns": [
+        { "user": "Build the blog banner pipeline. Rule: an article is never published without its banner.", "reply": "Agreed: publication stays blocked until the banner exists. Banners go to web/public/blog/banners/<slug>.webp at exactly 1600×900." },
+        { "user": "What size limit do inline images have?", "reply": "Inline media must be sRGB WebP, exactly 1600×900 and at most 320 KiB each." },
+        { "repeat": 10, "user": "Generate the banner draft for article {n}.", "reply": "Banner draft {n} is ready for review." }
+      ]
+    },
+    {
+      "tool": "claude",
+      "id": "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f809102",
+      "title": "Blog release",
+      "turns": [
+        { "user": "Which article failed the contract?", "reply": "The slug link-in-bio-vs-linktree failed: its comparison lacks a current screenshot of the official Linktree pricing page." },
+        { "repeat": 10, "user": "Run the banner contract for batch {n}.", "reply": "Banner contract batch {n} passes." },
+        { "user": "What did the build show?", "reply": "The production build passes; the banner contract test ran first, as designed." }
+      ]
+    },
+    {
+      "tool": "codex",
+      "id": "0a1b2c3d-4e5f-4061-8728-394a5b6c7d8e",
+      "title": "Blog follow-up",
+      "turns": [
+        { "user": "Status of the sitemap?", "reply": "The sitemap now lists 18 live articles; link-in-bio-vs-linktree stays excluded until its screenshot is captured." },
+        { "user": "Next step?", "reply": "Next: capture the Linktree pricing page from a fresh browser context without cookies or a login wall." }
+      ]
+    }
+  ]
+}

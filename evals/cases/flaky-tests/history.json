@@ -1,0 +1,27 @@
+{
+  "description": "Codex diagnoses a flaky test; Claude Code fixes it. Tests a reproduction recipe, a root cause and a commit id.",
+  "start": "2026-09-19T08:30:00.000Z",
+  "sessions": [
+    {
+      "tool": "codex",
+      "id": "3d4e5f60-7182-4394-8a5b-6c7d8e9fa0b1",
+      "title": "Flaky tests",
+      "turns": [
+        { "user": "Find why the test suite is flaky. Rule: never mark a failing test as skipped; fix it or tell me.", "reply": "Understood: no skipped tests. The flaky one is tests/schedule/next-run.test.ts; it fails about 1 run in 6." },
+        { "user": "Can you reproduce it?", "reply": "Yes: with TZ=Pacific/Auckland and seed 8841 it fails every time." },
+        { "repeat": 12, "user": "Rerun shard {n}.", "reply": "Shard {n} passed." },
+        { "user": "Root cause?", "reply": "Root cause: nextRun() builds dates with the local time zone instead of UTC, so it breaks around midnight in UTC+12." }
+      ]
+    },
+    {
+      "tool": "claude",
+      "id": "4e5f6071-8293-44a5-9b6c-7d8e9fa0b1c2",
+      "title": "Flaky tests follow-up",
+      "turns": [
+        { "user": "Fix it.", "reply": "Fixed in commit 9f3c2ab: nextRun() now uses Date.UTC; the test passes 200 of 200 runs under TZ=Pacific/Auckland." },
+        { "repeat": 10, "user": "Check the CI run for matrix entry {n}.", "reply": "Matrix entry {n} is green." },
+        { "user": "Anything else flaky?", "reply": "One more candidate: tests/billing/proration.test.ts timed out twice this week; not investigated yet." }
+      ]
+    }
+  ]
+}

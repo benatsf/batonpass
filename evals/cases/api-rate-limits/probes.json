@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "What is the minimum limit for authenticated partners?", "answer": "600 requests per minute", "accept": ["600 per minute", "600/min"] },
+  { "id": "p2", "kind": "identifier", "question": "What limit do anonymous clients get?", "answer": "60 requests per minute", "accept": ["60 per minute", "60/min"] },
+  { "id": "p3", "kind": "identifier", "question": "Which Redis key prefix do the counters use?", "answer": "rl:v2:" },
+  { "id": "p4", "kind": "identifier", "question": "What TTL do the counters have?", "answer": "60-second", "accept": ["60 seconds", "60 s"] },
+  { "id": "p5", "kind": "identifier", "question": "Which headers do clients see?", "answer": "X-RateLimit-Remaining Retry-After" },
+  { "id": "p6", "kind": "verified", "question": "What share of traffic has the rollout reached?", "answer": "10%" },
+  { "id": "p7", "kind": "identifier", "question": "Which flag gates the rollout?", "answer": "api_rate_limits_v2" },
+  { "id": "p8", "kind": "open", "question": "What is still open?", "answer": "two partner keys", "accept": ["acme-prod and globex-prod", "partner allowlist"] }
+]
