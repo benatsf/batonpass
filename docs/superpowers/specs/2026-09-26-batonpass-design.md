@@ -106,11 +106,13 @@ isolation.
 ```ts
 interface SourceReader {
   tool: 'codex' | 'claude' | string;
-  discover(): Promise<SourceFile[]>;            // candidate transcript files
-  read(file: SourceFile, from: Cursor): AsyncIterable<{ event: BatonEvent; cursor: Cursor }>;
+  discover(): SourceFile[];                                // candidate transcript files, oldest first
+  initialState(file: SourceFile): ParseState;             // session id and cwd before the first line
+  parse(line: string, state: ParseState): BatonEvent[];   // one JSONL line; may update state
+  sessionTitles?(): Map<string, string>;                   // optional thread names
 }
 
-interface Cursor { path: string; inode: number; offset: number; size: number; mtimeMs: number }
+interface Cursor { path: string; inode: number; offset: number; size: number; mtimeMs: number; skipping?: boolean }
 
 interface BatonEvent {
   tool: string; sessionId: string; ts: string;     // ISO 8601
@@ -122,8 +124,10 @@ interface BatonEvent {
 }
 ```
 
-Incremental reading: a cursor stores byte offset, inode, size and mtime. A read
-resumes at the offset and stops at the last complete line. If the inode changes
+Incremental reading is shared by all readers (`src/readers/lines.ts`): a
+cursor stores byte offset, inode, size and mtime. A read resumes at the offset
+and stops at the last complete line; a line longer than `reader.maxLineBytes`
+(8 MiB) is skipped and counted, even across read windows. If the inode changes
 or the size shrinks, the file is re-read from the start with events
 de-duplicated by `(tool, sessionId, ts, kind, hash(text))`. Lines that fail to
 parse are skipped and counted, never fatal.
@@ -153,7 +157,7 @@ multi-gigabyte rollouts.
 | Session line | Event |
 | --- | --- |
 | `user` with text content, `isMeta` false, no `sourceToolUseID`, not hook-injected | `user` |
-| last `assistant` text block before the next real `user` line | `final` |
+| `assistant` text block | `assistant` (the last one before the next real `user` line becomes the turn's reply) |
 | `assistant` `tool_use` block | `tool_call` (name and abbreviated input) |
 | `custom-title` | `title` |
 | `pr-link` | `pr` (number, repository, url) |
@@ -199,18 +203,26 @@ SQLite in WAL mode, `busy_timeout` 5 s, schema version in `PRAGMA user_version`
 with forward migrations.
 
 ```sql
-sources  (path PRIMARY KEY, tool, inode, offset, size, mtime_ms, session_id, updated_at)
-sessions (tool, session_id, project_id, title, first_ts, last_ts, model, PRIMARY KEY (tool, session_id))
-events   (id INTEGER PRIMARY KEY, project_id, tool, session_id, ts, kind, text, meta_json, dedupe_key UNIQUE)
-events_fts USING fts5(text, content='events', content_rowid='id')
-selections (project_id, event_id, reason, score, model, decided_at)   -- cached Jev/rule decisions
+sources   (path PRIMARY KEY, tool, inode, offset, size, mtime_ms, skipping, state_json, updated_at)
+sessions  (tool, session_id, project_id, title, first_ts, last_ts, cwd, model, source_path, usage_json,
+           turns, compactions, PRIMARY KEY (tool, session_id))
+events    (id INTEGER PRIMARY KEY, project_id, tool, session_id, ts, cwd, kind, text, meta_json, dedupe_key UNIQUE)
+events_fts USING fts5(text, content='events', content_rowid='id')          -- kept in sync by triggers
+scores    (project_id, item_key, model, question, score, decided_at)        -- cached Jev decisions per turn
 snapshots (project_id, seq, created_at, covers_json, brief_md, full_md, stats_json, PRIMARY KEY (project_id, seq))
+notes     (id, project_id, ts, text)
+jev_spend (day, input_tokens)
+redactions (rule, count)
 ```
 
-Atomicity: one ingest run for one project happens inside a single
-`BEGIN IMMEDIATE … COMMIT`. It advances cursors, inserts events, records
-selections and inserts snapshot `seq = max(seq) + 1`. Readers select the
-highest `seq` for a project, which is always a committed, complete snapshot.
+Atomicity: each transcript file is ingested in its own `BEGIN IMMEDIATE …
+COMMIT` that re-reads the cursor, inserts the file's new events and advances
+its cursor together, so a crash or a concurrent writer never loses or doubles
+events. Selection, Jev calls and live facts then run outside any transaction,
+so the write lock is never held across the network. The snapshot is committed
+in one short transaction that allocates `seq = max(seq) + 1`, renders the
+header with that number and inserts the row. Readers select the highest `seq`
+for a project, which is always a committed, complete snapshot.
 `covers_json` lists, for every source included, the session id, tool, last
 event timestamp and byte offset. Retention: events older than
 `retention.days` (default 90) are pruned, and snapshots beyond the last 50 per
@@ -229,9 +241,10 @@ commands separately. This follows the strongest published evidence found
 built from a keep/summarise/drop digest.
 
 **Pinned items** (always kept, outside the dialogue budget): `baton note`
-entries, the latest `goal` per session, `pr` events of the last 14 days, and a
-header line per recent session (tool, title, time range, model, turns,
-compactions).
+entries, the latest `goal` per recent session, `pr` events of the last 14
+days, and the recent sessions themselves: the brief's `Sources` line names
+each with its tool, title and last activity; the full snapshot adds time
+range, model, turns and compactions.
 
 **Strategy `recent-dialogue`** (default, no network): walk turns across all
 sessions of the project from newest to oldest and keep them until the budget
@@ -317,15 +330,15 @@ recall improves substantially when the receiving agent can make one targeted
 search (section 16), so the brief always states how. The `baton-resume` skill
 repeats the same instruction.
 
-The full snapshot adds the longer dialogue, a per-session timeline, an index of
-files and commands touched, and the selection statistics (strategy, Jev
-decisions and spend).
+The full snapshot adds the longer dialogue, a per-session timeline, the most
+recent tool calls (name and abbreviated input, never output), and the
+selection statistics (strategy, Jev decisions and spend).
 
 If the latest snapshot is older than the newest source mtime by more than
 `render.staleAfterSeconds` (default 900), the brief header states that it is
 stale and by how much, rather than blocking to re-ingest.
 
-### 6.8 Integrations (`src/hooks/`, `integrations/`)
+### 6.8 Integrations (`src/hooks.ts`, `src/install.ts`, `integrations/`)
 
 A single entry point, `baton hook <event> --tool codex|claude`, reads the hook
 JSON from stdin and writes the tool's expected JSON to stdout. Both tools
@@ -335,11 +348,19 @@ provide `session_id`, `transcript_path`, `cwd` and `hook_event_name`.
 | --- | --- | --- | --- |
 | `SessionStart` | `startup\|resume\|clear\|compact` | sync, timeout 5 s | Resolve project from `cwd`, read the latest snapshot, return it as `additionalContext` (Claude: `hookSpecificOutput.additionalContext`; Codex: `additionalContext` with `additionalContextLimit` 2500). No ingest, no network. Empty output when there is no snapshot. |
 | `Stop` | all | async, timeout 120 s | Ingest the calling session's `transcript_path` and any other changed sources of the same project, select, render, commit. Uses a per-project lock file; a second concurrent run exits immediately. |
-| `PreCompact` | all | sync, timeout 10 s | Ingest only (no Jev), so nothing is lost before the tool compacts. |
+| `PreCompact` | all | sync, timeout 10 s | Ingest only (no Jev), so nothing is lost before the tool compacts. Codex does not pass `transcript_path` for this event, so its rollout is found by session id. |
 
 Loop and echo prevention: the brief is wrapped in `<baton-context …>`; readers
-drop user messages or system lines whose text starts with that tag. Hook runs
-set `BATON_HOOK=1`; `baton` refuses to spawn agents while it is set.
+drop user messages or system lines whose text starts with that tag, and quoted
+history cannot open or close the tag. Agents that batonpass itself starts (the
+evaluation's answering sessions) run with `BATON_HOOK=1`: every hook does
+nothing while it is set, and `baton resume` and `baton eval` refuse to run.
+`baton resume` starts the other tool with `BATON_SKIP_INJECT=1`, because the
+brief is already its first prompt.
+
+`Stop` and `PreCompact` print nothing: Codex treats plain text on `Stop` as
+invalid output. Codex asks the user to review and trust new non-managed hooks
+once (`/hooks`); `baton install` says so.
 
 `baton install [--claude] [--codex] [--dry-run]`:
 
@@ -387,14 +408,16 @@ CLI:
 
 - Hooks never fail a session. Every hook body is wrapped: on any error it logs
   one line (event, tool, error class, no content) and prints the empty success
-  response. A `SessionStart` over its internal 800 ms budget returns empty.
+  response. `SessionStart` does no ingest and no network call; the tool's
+  5 s hook timeout is the hard cap, and the p95 target is tested.
 - Malformed transcript lines are skipped and counted.
 - SQLite busy: retried within `busy_timeout`, then the ingest is skipped. The
   next `Stop` catches up because cursors did not advance.
 - Jev errors, timeouts, 429s or a missing key fall back to the deterministic
   core. The snapshot stats record `jev: "skipped:<reason>"`.
-- Unknown line types from a newer tool version are ignored. `baton doctor`
-  reports the counts so a reader update can be written.
+- Unknown line types from a newer tool version are ignored. Hooks log counts
+  of malformed and over-long lines (never content), and `baton doctor`
+  summarises them so a reader update can be written.
 
 ## 9. Security and privacy
 
@@ -417,7 +440,7 @@ CLI:
 
 | Operation | Budget |
 | --- | --- |
-| `SessionStart` hook | p95 < 300 ms, hard cap 800 ms |
+| `SessionStart` hook | p95 < 300 ms (tested); the tool's 5 s timeout is the hard cap |
 | `Stop` ingest, no Jev, 1 MB of new transcript | < 1.5 s |
 | First backfill of a 10 GB rollout | reads ≤ 64 MiB, < 10 s |
 | Jev per ingest | ≤ 4 requests, ≤ 120k input tokens |
@@ -443,8 +466,9 @@ CLI:
 - **End-to-end:** a scripted fixture session in "codex" format followed by a
   `SessionStart` in "claude" format returns a brief containing the expected
   final answer, rule and PR.
-- CI: GitHub Actions on macOS and Ubuntu with Node 24 (and the latest
-  current); lint, typecheck, tests, fixture secret scan.
+- CI: GitHub Actions on macOS and Ubuntu with Node 24 and the current
+  release; strict typecheck, tests (including the secret scan of docs,
+  fixtures, integrations and scorecards), build.
 
 ### 11.1 Recall evaluation
 
@@ -459,12 +483,14 @@ The claim "a fresh session can continue the work" is measured, not assumed.
 - **Procedure.** For each case and strategy: ingest the history, render the
   brief, then (a) answer every probe using only the brief and (b) answer with
   the brief plus at most one `baton search` whose query the answering model
-  chooses. The answering model and the grader are configurable (`claude -p` or
-  `codex exec` by default, so no extra API key is required); grading checks the
-  expected answer or an accepted paraphrase and is recorded per probe.
+  chooses. The answering command is configurable (`claude -p` by default,
+  `codex exec` works too, so no extra API key is required). Grading is
+  deterministic: a probe passes when every word of the expected answer, or of
+  one accepted paraphrase, appears in the reply. Each result is recorded per
+  probe.
 - **Strategies compared.** `recent-dialogue`, `jev-select`, `jev-select` with
-  `jev.rules`, and a "no context" floor. Where the tool can produce one, its
-  native compaction summary is added as a reference row.
+  `jev.rules`, and a "no context" floor. Jev rows are skipped, and marked so,
+  when no TypeSafe key is configured.
 - **Output.** `evals/results/SCORECARD-<date>.md`: recall with the brief
   alone and with one search, per strategy, plus brief size, ingest time and
   Jev cost. Raw per-probe results are stored next to it.
@@ -477,16 +503,22 @@ The claim "a fresh session can continue the work" is measured, not assumed.
 
 ```
 batonpass/
-  src/{cli.ts, hooks/, readers/{codex.ts,claude.ts}, project.ts, redact.ts,
-       ledger.ts, select/, facts.ts, render.ts, config.ts}
-  integrations/{claude-plugin/, codex/, skills/baton-resume/SKILL.md}
-  tests/{fixtures/, *.test.ts}
-  evals/{cases/, results/, run.ts}
-  docs/{architecture.md, privacy.md, writing-a-reader.md}
+  bin/baton.js
+  src/{cli.ts, commands.ts, hooks.ts, install.ts, context.ts, snapshot.ts, lock.ts,
+       readers/{lines.ts,codex.ts,claude.ts}, script.ts, project.ts, redact.ts,
+       ledger.ts, ingest.ts, select/{dialogue,recent,jev,rules,spend}.ts,
+       facts.ts, render.ts, eval.ts, config.ts, types.ts}
+  integrations/{claude-plugin/, skills/baton-resume/SKILL.md}
+  tests/*.test.ts   release/eval-gate.test.ts
+  evals/{cases/, results/}
+  docs/{privacy.md, writing-a-reader.md}
   README.md  CONTRIBUTING.md  SECURITY.md  LICENSE (MIT)  CHANGELOG.md
 ```
 
-The README covers the problem, a 30-second demo (GIF), the latest scorecard,
+Codex needs no separate integration directory: `baton install` writes its
+`hooks.json` entries and skill directly.
+
+The README covers the problem, a short demo (a GIF is recorded for the launch), the latest scorecard,
 install
 (`npm i -g batonpass && baton install`), what gets sent where, and
 configuration. CONTRIBUTING includes "add a reader for your agent" with the
@@ -514,7 +546,7 @@ supported are listed per tool version.
 | --- | --- |
 | Transcript formats change without notice | One reader per tool, fixtures per version, unknown lines ignored and counted, `doctor` reports drift |
 | Hook APIs change | Hook adapter per tool with contract tests; install records exact entries for clean uninstall |
-| Redaction misses a secret | Store no tool results; conservative rules plus entropy check; CI secret scan; users can add rules in config |
+| Redaction misses a secret | Store no tool results; conservative rules plus entropy check; CI secret scan; a real-data check before each release (`strings` over the ledger) |
 | Brief misleads a session with stale data | Freshness header with sequence number, covered positions and staleness warning |
 | Prompt injection via quoted content | Tool results never stored; brief framed as data; quoted tool text labelled untrusted |
 | Jev cost or availability | Per-ingest and daily caps; cached decisions; deterministic fallback |
@@ -526,7 +558,8 @@ supported are listed per tool version.
 
 MCP server over the same ledger; readers for Cursor, Gemini CLI and OpenCode
 (community); optional encrypted sync between machines; `baton diff` between
-snapshots.
+snapshots; user-defined redaction rules in `config.toml`; each tool's native
+compaction summary as a reference row in the evaluation.
 
 ## 16. Prior art and what it changed (reviewed 2026-09-26)
 
