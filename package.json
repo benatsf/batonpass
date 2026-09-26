@@ -3,10 +3,42 @@
   "version": "0.1.0",
   "description": "Automatic, local, verbatim session handoff between Codex and Claude Code.",
   "license": "MIT",
+  "author": "solsebb",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solsebb/batonpass.git"
+  },
+  "homepage": "https://github.com/solsebb/batonpass#readme",
+  "bugs": {
+    "url": "https://github.com/solsebb/batonpass/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "coding-agents",
+    "context",
+    "handoff",
+    "session",
+    "hooks",
+    "llm",
+    "developer-tools"
+  ],
   "type": "module",
-  "bin": { "baton": "bin/baton.js" },
-  "files": ["bin", "dist", "integrations", "evals/cases", "README.md", "LICENSE"],
-  "engines": { "node": ">=24" },
+  "bin": {
+    "baton": "bin/baton.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "integrations",
+    "evals/cases",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
