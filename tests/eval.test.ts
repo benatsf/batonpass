@@ -77,5 +77,15 @@ test('a scorecard with answering errors fails the release gate', () => {
   const card = { date: '2026-09-26', answerCommand: 'x', cases: 8, probes: 64, rows: [row('no-context', 0), row('recent-dialogue', 68)], results: [] };
   assert.equal(gate(card, 'recent-dialogue'), false);
   assert.match(renderScorecard(card), /Release gate \(spec 11\.1\): fails: 68 answering errors \(empty replies or timeouts\); rerun the evaluation\./);
-  assert.equal(gate({ ...card, rows: [row('no-context', 0), row('recent-dialogue', 0)] }, 'recent-dialogue'), true);
+  assert.equal(gate({ ...card, rows: [row('no-context', 0), { ...row('recent-dialogue', 0), passBrief: 46, recallBrief: 0.72 }] }, 'recent-dialogue'), true);
+});
+
+test('the release gate requires the default brief to beat having no context', () => {
+  const row = (strategy: 'no-context' | 'recent-dialogue', recallBrief: number) => ({
+    strategy, status: 'ok' as const, probes: 64, passBrief: 0, passSearch: 0, recallBrief, recallSearch: 0.5,
+    briefTokens: 0, refreshMs: 0, jevInputTokens: 0, costUsd: 0, answerErrors: 0,
+  });
+  const card = (floor: number, brief: number) => ({ date: 'd', answerCommand: 'x', cases: 8, probes: 64, rows: [row('no-context', floor), row('recent-dialogue', brief)], results: [] });
+  assert.equal(gate(card(0, 0), 'recent-dialogue'), false);
+  assert.equal(gate(card(0, 0.7), 'recent-dialogue'), true);
 });

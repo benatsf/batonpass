@@ -70,7 +70,7 @@ export function defaultConfig(home: string, env: NodeJS.ProcessEnv): BatonConfig
       codexHome: env.CODEX_HOME ? expandHome(env.CODEX_HOME, env) : join(userHome(env), '.codex'),
       claudeProjects: join(userHome(env), '.claude', 'projects'),
     },
-    eval: { answerCommand: ['claude', '-p'] },
+    eval: { answerCommand: ['claude', '-p', '--no-session-persistence'] },
   };
 }
 

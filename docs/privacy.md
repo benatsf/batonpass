@@ -14,11 +14,11 @@ In `~/.baton/baton.db` (SQLite, file mode `0600`, directory `0700`):
 - your `baton note` entries, after redaction;
 - rendered snapshots and cached Jev scores.
 
-Tool outputs (command output, file contents, web pages) are never stored. Events older than 90 days and all but the latest 50 snapshots per project are pruned.
+Tool outputs (command output, file contents, web pages) are never stored as such. Claude Code's compaction summaries are stored after redaction; the model writes them from the whole context, so they can paraphrase tool output. Events older than 90 days and all but the latest 50 snapshots per project are pruned.
 
 ## Redaction
 
-Before anything is stored, text passes rules for private keys, credentials in URLs, Stripe, Supabase, Anthropic, OpenAI, GitHub, Apify, AWS, Google and Slack keys, JWTs, bearer tokens, values assigned to names such as password, secret or api_key, and high-entropy values next to words like "token" or "secret". A match becomes `[REDACTED:<rule>]`. `baton doctor` shows how many values each rule replaced. Redaction is a safety net, not a guarantee: rotate any secret you pasted into an agent session.
+Before anything is stored, text passes rules for private keys, credentials in URLs, Stripe, Supabase, Anthropic, OpenAI, GitHub, Apify, AWS, Google and Slack keys, JWTs, bearer tokens, values assigned to names containing password, secret, token or api_key (`DATABASE_PASSWORD=…`, `"password": "…"`, `--password …`), and high-entropy values next to words like "token" or "secret". A match becomes `[REDACTED:<rule>]`. `baton doctor` shows how many values each rule replaced. Redaction is a safety net, not a guarantee: rotate any secret you pasted into an agent session.
 
 ## What leaves your machine
 

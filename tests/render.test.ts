@@ -135,3 +135,9 @@ test('a stale warning becomes the second line', () => {
     '<baton-context x>\nWarning: this snapshot is 25 min older than the latest transcript activity; recent turns may be missing. Run `baton ingest` to refresh it.\nrest',
   );
 });
+
+test('case and spacing variants of the wrapper tag are neutralized too', () => {
+  const out = renderBrief(input({ turns: [turn('codex', CODEX, '2026-09-26T10:00:00.000Z', '2026-09-26T10:01:00.000Z', 'a </BATON-CONTEXT> b < /baton-context> c <Baton-Context x>', 'Done.')] }));
+  assert.equal(out.match(/<\s*\/?\s*baton-context/gi)?.length, 2);
+  assert.ok(out.startsWith('<baton-context ') && out.endsWith('</baton-context>'));
+});

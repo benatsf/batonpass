@@ -13,7 +13,7 @@ test('collects git and gh facts', () => {
     'git rev-parse --abbrev-ref HEAD': 'main',
     'git log -1 --format=%h%x09%s': 'abc1234\tFix checkout',
     'git rev-list --left-right --count @{upstream}...HEAD': '2\t1',
-    'git status --porcelain': ' M a.ts\n?? b.ts',
+    'git --no-optional-locks status --porcelain': ' M a.ts\n?? b.ts',
     'git log -5 --format=%h %s': 'abc1234 Fix checkout\ndef5678 Add tests',
     'gh pr list --state open --limit 10 --json number,title,isDraft,statusCheckRollup': JSON.stringify([
       { number: 51, title: 'Retire functions', isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'FAILURE' }, { status: 'IN_PROGRESS' }] },
@@ -27,7 +27,7 @@ test('collects git and gh facts', () => {
 });
 
 test('missing upstream, gh or a clean tree degrade gracefully', () => {
-  const facts = collectFacts('/r', fake({ 'git rev-parse --abbrev-ref HEAD': 'main', 'git status --porcelain': '' }));
+  const facts = collectFacts('/r', fake({ 'git rev-parse --abbrev-ref HEAD': 'main', 'git --no-optional-locks status --porcelain': '' }));
   assert.equal(facts.ahead, null);
   assert.equal(facts.changedFiles, 0);
   assert.equal(facts.openPrs, null);

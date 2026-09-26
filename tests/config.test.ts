@@ -20,6 +20,7 @@ test('defaults follow the spec', () => {
   assert.equal(config.backfill.maxBytes, 64 * 1024 * 1024);
   assert.equal(config.sources.codexHome, join(home, '.codex'));
   assert.equal(config.sources.claudeProjects, join(home, '.claude', 'projects'));
+  assert.deepEqual(config.eval.answerCommand, ['claude', '-p', '--no-session-persistence']);
 });
 
 test('BATON_HOME defaults to ~/.baton and CODEX_HOME is honoured', () => {

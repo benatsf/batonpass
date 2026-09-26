@@ -317,6 +317,9 @@ export function gate(card: Scorecard, defaultStrategy: string): boolean {
   const row = (strategy: string) => card.rows.find((r) => r.strategy === strategy && r.status === 'ok');
   const chosen = row(defaultStrategy);
   const base = row('recent-dialogue');
+  // The default compared with itself always ties, so also require the brief to beat no context.
+  const floor = row('no-context');
+  if (floor && base && !(base.recallBrief > floor.recallBrief)) return false;
   return Boolean(chosen && base && chosen.recallBrief >= base.recallBrief && chosen.recallSearch >= base.recallSearch);
 }
 

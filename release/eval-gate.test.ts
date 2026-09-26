@@ -18,6 +18,10 @@ test('a published scorecard exists and covers every shipped case', () => {
   assert.ok(card.probes >= 60, 'at least 60 probes');
 });
 
+test('the scorecard includes the no-context floor', () => {
+  assert.ok(row('no-context'), 'run the evaluation with the no-context strategy');
+});
+
 test('the default strategy is at least as good as recent-dialogue on both measures', () => {
   assert.ok(card && gate(card, defaults.select.strategy));
 });

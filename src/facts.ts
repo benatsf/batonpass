@@ -53,7 +53,8 @@ export function collectFacts(root: string, run: CommandRunner = defaultRunner, b
   const [head, subject] = headLine ? headLine.split('\t') : [];
   const counts = call('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']);
   const [behind, ahead] = counts ? counts.split(/\s+/).map(Number) : [];
-  const status = call('git', ['status', '--porcelain']);
+  // --no-optional-locks: never take index.lock, so the agent's own git commands are not blocked.
+  const status = call('git', ['--no-optional-locks', 'status', '--porcelain']);
   const log = call('git', ['log', '-5', '--format=%h %s']);
   const prs = call('gh', ['pr', 'list', '--state', 'open', '--limit', '10', '--json', 'number,title,isDraft,statusCheckRollup']);
   return {

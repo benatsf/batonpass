@@ -55,7 +55,7 @@ export function resumeCommand(tool: string, sessionId: string): string {
 
 /** Quoted history must never open or close the wrapper tag. */
 function neutralize(text: string): string {
-  return text.replace(/<(\/?)baton-context/g, '‹$1baton-context');
+  return text.replace(/<\s*(\/?)\s*baton-context/gi, '‹$1baton-context');
 }
 
 function build(input: RenderInput, detail: 'brief' | 'full', trim: Trim): string {

@@ -44,7 +44,7 @@ Existing history is read on the first `baton ingest` (the last 30 days, at most 
 ## Privacy
 
 - Transcripts never leave your machine. The ledger lives in `~/.baton` (directory `0700`, database `0600`).
-- Tool outputs are never stored. Every stored message passes a secret redactor first.
+- Tool outputs are never stored (Claude Code's compaction summaries are, and the model writes those from the whole context). Everything stored passes a secret redactor first.
 - The default strategy makes no network call. The only optional network use is Jev (below) and read-only `gh` for open pull requests.
 
 Details: [docs/privacy.md](docs/privacy.md).
