@@ -8,7 +8,7 @@ import { defaultConfig, ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
 import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATEGIES, writeScorecard, type Strategy } from './eval.ts';
 import { normalizeEvent, runHook } from './hooks.ts';
-import { applyPlan, defaultCommand, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
+import { applyPlan, defaultLauncher, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
 
 export const VERSION = '0.1.0';
 
@@ -111,7 +111,7 @@ function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
   const paths = installPaths(io.env, config.home);
   const target = values.claude || values.codex ? { claude: Boolean(values.claude), codex: Boolean(values.codex) } : { claude: true, codex: true };
   const now = new Date();
-  const plan = uninstall ? planUninstall(paths) : planInstall(paths, target, defaultCommand(), readFileSync(SKILL_SOURCE, 'utf8'), now);
+  const plan = uninstall ? planUninstall(paths) : planInstall(paths, target, defaultLauncher(), readFileSync(SKILL_SOURCE, 'utf8'), now);
   if (plan.changes.length) io.out(`${renderDiff(plan.changes)}\n\n`);
   else io.out('Nothing to change.\n');
   if (values['dry-run']) {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,12 +12,20 @@ export interface InstallPaths {
   codexSkill: string;
   manifest: string;
   backups: string;
+  /** Stable hook entry point; hooks never name a versioned Node path directly. */
+  launcher: string;
 }
 
 export interface FileChange {
   path: string;
   before: string | null;
   after: string | null;
+  mode?: number;
+}
+
+export interface Launcher {
+  node: string;
+  script: string;
 }
 
 export interface Manifest {
@@ -28,6 +36,7 @@ export interface Manifest {
   files: string[];
   created: string[];
   skills: string[];
+  launcher?: string;
 }
 
 export interface InstallPlan {
@@ -57,14 +66,40 @@ export function installPaths(env: NodeJS.ProcessEnv, batonHome: string): Install
     codexSkill: join(codexHome, 'skills', 'baton-resume', 'SKILL.md'),
     manifest: join(batonHome, 'install.json'),
     backups: join(batonHome, 'backups'),
+    launcher: join(batonHome, 'bin', 'baton'),
   };
 }
 
 const quote = (s: string) => (/^[\w./-]+$/.test(s) ? s : `"${s.replace(/(["\\$`])/g, '\\$1')}"`);
 
-export function defaultCommand(): string {
-  const bin = realpathSync(fileURLToPath(new URL('../bin/baton.js', import.meta.url)));
-  return `${quote(process.execPath)} ${quote(bin)}`;
+export function defaultLauncher(): Launcher {
+  return { node: process.execPath, script: realpathSync(fileURLToPath(new URL('../bin/baton.js', import.meta.url))) };
+}
+
+const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** A POSIX shell launcher: runs batonpass with the recorded Node, and never fails a hook if either moved. */
+export function launcherScript(launcher: Launcher): string {
+  return [
+    '#!/bin/sh',
+    '# Written by `baton install`. Run `baton install` again after moving Node or batonpass.',
+    `node=${shellQuote(launcher.node)}`,
+    `script=${shellQuote(launcher.script)}`,
+    'if [ -x "$node" ] && [ -f "$script" ]; then exec "$node" "$script" "$@"; fi',
+    '# Hooks must never fail a Codex or Claude Code session.',
+    'if [ "$1" = hook ]; then exit 0; fi',
+    'echo "batonpass: $node or $script no longer exists; run baton install again." >&2',
+    'exit 1',
+    '',
+  ].join('\n');
+}
+
+function launcherTargets(text: string): Launcher | null {
+  // Values are single-quoted, with each ' written as '\'' (see shellQuote).
+  const value = (name: string) => new RegExp(`^${name}='((?:[^']|'\\\\'')*)'$`, 'm').exec(text)?.[1]?.replaceAll(`'\\''`, "'");
+  const node = value('node');
+  const script = value('script');
+  return node && script ? { node, script } : null;
 }
 
 function entries(tool: 'claude' | 'codex', command: string): Array<{ event: string; group: Group }> {
@@ -120,8 +155,9 @@ function readManifest(path: string): Manifest | null {
 
 const serialize = (value: Json) => `${JSON.stringify(value, null, 2)}\n`;
 
-export function planInstall(paths: InstallPaths, target: { claude: boolean; codex: boolean }, command: string, skillText: string, now: Date): InstallPlan {
+export function planInstall(paths: InstallPaths, target: { claude: boolean; codex: boolean }, launcher: Launcher, skillText: string, now: Date): InstallPlan {
   const previous = readManifest(paths.manifest);
+  const command = quote(paths.launcher);
   const tools = (['claude', 'codex'] as const).filter((tool) => target[tool]);
   const commands = tools.flatMap((tool) => entries(tool, command).map((e) => String(e.group.hooks![0]!.command)));
   const stale = new Set([...(previous?.commands ?? []), ...commands]);
@@ -147,6 +183,10 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     if (skillBefore !== skillText) changes.push({ path: skill, before: skillBefore, after: skillText });
   }
 
+  const launcherText = launcherScript(launcher);
+  const launcherBefore = readText(paths.launcher);
+  if (launcherBefore !== launcherText) changes.push({ path: paths.launcher, before: launcherBefore, after: launcherText, mode: 0o755 });
+
   const notes = [
     'batonpass keeps everything in ~/.baton. The default strategy makes no network calls; see docs/privacy.md before enabling jev-select, which sends redacted dialogue text to TypeSafe.',
   ];
@@ -163,6 +203,7 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     files: [...new Set([...(previous?.files ?? []), ...files])],
     created: [...created],
     skills: [...new Set([...(previous?.skills ?? []), ...tools.map((t) => (t === 'claude' ? paths.claudeSkill : paths.codexSkill))])],
+    launcher: paths.launcher,
   };
   return { changes, manifest, notes };
 }
@@ -184,7 +225,7 @@ export function planUninstall(paths: InstallPaths): InstallPlan {
     const after = manifest.created.includes(path) && (Object.keys(doc).length === 0 || emptyCodex) ? null : serialize(doc);
     if (after !== before) changes.push({ path, before, after });
   }
-  for (const skill of manifest.skills) {
+  for (const skill of [...manifest.skills, ...(manifest.launcher ? [manifest.launcher] : [])]) {
     const before = readText(skill);
     if (before !== null) changes.push({ path: skill, before, after: null });
   }
@@ -209,6 +250,7 @@ export function applyPlan(paths: InstallPaths, plan: InstallPlan, now: Date): vo
     } else {
       mkdirSync(dirname(change.path), { recursive: true });
       writeFileSync(change.path, change.after);
+      if (change.mode !== undefined) chmodSync(change.path, change.mode);
     }
   }
   if (plan.manifest) writeFileSync(paths.manifest, serialize(plan.manifest as unknown as Json), { mode: 0o600 });
@@ -242,11 +284,16 @@ export function renderDiff(changes: FileChange[]): string {
 export function hookStatus(paths: InstallPaths): Check[] {
   const manifest = readManifest(paths.manifest);
   if (!manifest) return [[null, 'Hooks not installed: run `baton install`']];
-  return manifest.tools.map((tool) => {
+  const checks: Check[] = manifest.tools.map((tool) => {
     const text = readText(tool === 'claude' ? paths.claudeSettings : paths.codexHooks) ?? '';
     const mine = manifest.commands.filter((c) => c.endsWith(`--tool ${tool}`));
     const present = mine.filter((c) => text.includes(JSON.stringify(c))).length;
     const label = tool === 'claude' ? 'Claude Code' : 'Codex';
     return [present === mine.length && present > 0, `${label} hooks installed (${present} of ${mine.length})`] as Check;
   });
+  const targets = launcherTargets(readText(paths.launcher) ?? '');
+  if (!targets || !existsSync(targets.node) || !existsSync(targets.script)) {
+    checks.push([false, 'Hook launcher points to a missing Node or batonpass: run `baton install` again']);
+  }
+  return checks;
 }
