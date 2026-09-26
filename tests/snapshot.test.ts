@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, statSync } from 'node:fs';
 import { tryLock } from '../src/lock.ts';
 import { codexLines, writeSession, type ScriptSession } from '../src/script.ts';
-import { lockPath, refresh } from '../src/snapshot.ts';
+import { lockPath, recentSelector, refresh, type Selector } from '../src/snapshot.ts';
 import { makeEnv } from './support/env.ts';
 
 const stripe = 'sk_' + 'live_' + 'aB3dE5fG7hJ9kL2mN4pQ6rS8';
@@ -60,7 +60,7 @@ test('a second refresh picks up new turns and increments seq', async () => {
 test('a held project lock skips the refresh', async () => {
   const { env, deps } = setup();
   const held = tryLock(lockPath(env.home, env.projectId))!;
-  assert.deepEqual(await refresh(deps, { projectId: env.projectId }), { status: 'locked', seq: null, ingest: null });
+  assert.deepEqual(await refresh(deps, { projectId: env.projectId, lockWaitMs: 0 }), { status: 'locked', seq: null, ingest: null });
   assert.equal(env.deps.ledger.latestSnapshot(env.projectId), null);
   held.release();
   assert.equal((await refresh(deps, { projectId: env.projectId })).status, 'committed');
@@ -93,4 +93,23 @@ test('refreshes about 1 MB of new transcript within 1.5 s (spec 10)', async () =
   const ms = performance.now() - started;
   assert.equal(result.status, 'committed');
   assert.ok(ms < 1500, `took ${Math.round(ms)} ms`);
+});
+
+test('a refresh that loses the lock is picked up by the lock holder', async () => {
+  const { env, deps } = setup();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let calls = 0;
+  const slow: Selector = async (input) => {
+    if (++calls === 1) await gate;
+    return recentSelector(input);
+  };
+  const first = refresh({ ...deps, select: slow }, { projectId: env.projectId, root: env.repo });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  writeSession(env.root, { tool: 'claude', id: '9e9e9e9e-9e9e-4e9e-8e9e-9e9e9e9e9e9e', cwd: env.repo, turns: [{ at: '2026-09-26T14:00:00.000Z', user: 'One more thing.', reply: 'Late reply recorded.' }] });
+  const second = await refresh(deps, { projectId: env.projectId, root: env.repo, lockWaitMs: 0 });
+  assert.equal(second.status, 'locked');
+  release();
+  assert.equal((await first).status, 'committed');
+  assert.ok(env.deps.ledger.latestSnapshot(env.projectId)!.brief.includes('Late reply recorded.'));
 });
