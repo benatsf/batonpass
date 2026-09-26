@@ -1,8 +1,11 @@
 import { spawn as spawnProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { doctor, ingestCommand, note, resume, search, show, status, type Command } from './commands.ts';
+import { ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
 import { runHook } from './hooks.ts';
+import { applyPlan, defaultCommand, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
 
 export const VERSION = '0.1.0';
 
@@ -68,6 +71,25 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
   return 0;
 }
 
+function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
+  const { values } = parseArgs({ args, options: { claude: { type: 'boolean' }, codex: { type: 'boolean' }, 'dry-run': { type: 'boolean' } } });
+  const config = loadConfig(io.env);
+  ensureHome(config.home);
+  const paths = installPaths(io.env, config.home);
+  const target = values.claude || values.codex ? { claude: Boolean(values.claude), codex: Boolean(values.codex) } : { claude: true, codex: true };
+  const now = new Date();
+  const plan = uninstall ? planUninstall(paths) : planInstall(paths, target, defaultCommand(), readFileSync(SKILL_SOURCE, 'utf8'), now);
+  if (plan.changes.length) io.out(`${renderDiff(plan.changes)}\n\n`);
+  else io.out('Nothing to change.\n');
+  if (values['dry-run']) {
+    io.out('Dry run: nothing was written.\n');
+    return 0;
+  }
+  applyPlan(paths, plan, now);
+  for (const line of plan.notes) io.out(`${line}\n`);
+  return 0;
+}
+
 const USAGE = `Usage: baton <command> [options]
 
 Commands:
@@ -98,6 +120,14 @@ export async function main(argv: string[], io: CliIO = defaultIO(), makeContext:
       return 0;
     case 'hook':
       return hookCommand(rest, io, makeContext);
+    case 'install':
+    case 'uninstall':
+      try {
+        return installCommand(rest, io, command === 'uninstall');
+      } catch (error) {
+        io.err(`${error instanceof Error ? error.message : String(error)}\n`);
+        return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
+      }
   }
   const run = COMMANDS[command];
   if (!run) {

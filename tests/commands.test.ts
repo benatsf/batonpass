@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { captureIO, main, type CliIO } from '../src/cli.ts';
 import { createContext } from '../src/context.ts';
 import { writeSession } from '../src/script.ts';
@@ -106,6 +108,16 @@ test('doctor reports its checks', async () => {
   assert.match(t.out(), /^✓ Ledger integrity: ok$/m);
   assert.match(t.out(), /^✓ Codex transcripts found: 1$/m);
   assert.match(t.out(), /^– Jev: off \(select\.strategy = recent-dialogue, no network calls\)$/m);
+  assert.match(t.out(), /^– Hooks not installed: run `baton install`$/m);
+});
+
+test('install --dry-run shows the diff and writes nothing', async () => {
+  const t = setup();
+  assert.equal(await t.run(['install', '--dry-run']), 0);
+  assert.match(t.out(), /^\+\+\+ .*\/\.claude\/settings\.json$/m);
+  assert.match(t.out(), /hook session-start --tool codex/);
+  assert.match(t.out(), /Dry run: nothing was written\.\n$/);
+  assert.equal(existsSync(join(t.env.root, '.claude', 'settings.json')), false);
 });
 
 test('hook reads stdin, prints JSON, and never exits non-zero', async () => {

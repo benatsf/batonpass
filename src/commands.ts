@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import type { CliIO } from './cli.ts';
 import { staleSeconds, type Context } from './context.ts';
 import { ingest } from './ingest.ts';
+import { hookStatus, installPaths } from './install.ts';
 import { redact } from './redact.ts';
 import { withStaleWarning } from './render.ts';
 import { abridge, formatTime, toolLabel } from './select/dialogue.ts';
@@ -179,6 +180,7 @@ export function doctorChecks(ctx: Context): Check[] {
   const redactions = Object.entries(ctx.ledger.redactionCounts()).map(([rule, n]) => `${rule} ${n}`).join(', ');
   checks.push([null, `Secrets redacted so far: ${redactions || 'none'}`]);
   checks.push(logProblems(ctx.config.home));
+  checks.push(...hookStatus(installPaths(ctx.env, ctx.config.home)));
   if (ctx.config.select.strategy === 'jev-select') {
     const hasKey = Boolean(ctx.env[ctx.config.jev.apiKeyEnv]);
     checks.push([hasKey, `Jev: on, key in ${ctx.config.jev.apiKeyEnv} ${hasKey ? 'present' : 'missing'}`]);
