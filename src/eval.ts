@@ -309,7 +309,11 @@ export async function runEval(o: EvalOptions): Promise<Scorecard> {
   return { date: o.date ?? new Date().toISOString().slice(0, 10), answerCommand: o.answerCommand, cases: o.cases.length, probes, rows, results };
 }
 
+const answerErrors = (card: Scorecard) => card.rows.reduce((n, r) => n + r.answerErrors, 0);
+
 export function gate(card: Scorecard, defaultStrategy: string): boolean {
+  // Empty replies (rate limits, timeouts) make recall meaningless, so they fail the gate.
+  if (answerErrors(card) > 0) return false;
   const row = (strategy: string) => card.rows.find((r) => r.strategy === strategy && r.status === 'ok');
   const chosen = row(defaultStrategy);
   const base = row('recent-dialogue');
@@ -333,10 +337,10 @@ export function renderScorecard(card: Scorecard, defaultStrategy = 'recent-dialo
         : `| ${r.strategy} | skipped (no TypeSafe key) | – | – | – | – | – |`,
     ),
     '',
-    `Release gate (spec 11.1): the default strategy \`${defaultStrategy}\` ${gate(card, defaultStrategy) ? 'passes' : 'fails'} (at least as good as \`recent-dialogue\` on both measures).`,
+    answerErrors(card)
+      ? `Release gate (spec 11.1): fails: ${answerErrors(card)} answering errors (empty replies or timeouts); rerun the evaluation.`
+      : `Release gate (spec 11.1): the default strategy \`${defaultStrategy}\` ${gate(card, defaultStrategy) ? 'passes' : 'fails'} (at least as good as \`recent-dialogue\` on both measures).`,
   ];
-  const errors = card.rows.reduce((n, r) => n + r.answerErrors, 0);
-  if (errors) lines.push('', `Answering errors (empty replies or timeouts): ${errors}.`);
   return `${lines.join('\n')}\n`;
 }
 

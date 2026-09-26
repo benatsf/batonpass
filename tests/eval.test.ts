@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CASES_DIR, grade, loadCase, loadCases, renderScorecard, runEval, tokens, writeScorecard, type Answerer, type Probe } from '../src/eval.ts';
+import { CASES_DIR, gate, grade, loadCase, loadCases, renderScorecard, runEval, tokens, writeScorecard, type Answerer, type Probe } from '../src/eval.ts';
 
 test('tokens fold case, accents and punctuation; grading needs every word', () => {
   assert.deepEqual(tokens('Français, RLS!'), ['francais', 'rls']);
@@ -67,4 +67,15 @@ test('Jev rows run with an injected asker and are skipped without a key', async 
   const skipped = await runEval({ cases, strategies: ['jev-select+rules'], answer: oracle, answerCommand: 'oracle', env: {} });
   assert.equal(skipped.rows[0]!.status, 'skipped:no-key');
   assert.match(renderScorecard(skipped), /\| jev-select\+rules \| skipped \(no TypeSafe key\) \|/);
+});
+
+test('a scorecard with answering errors fails the release gate', () => {
+  const row = (strategy: 'no-context' | 'recent-dialogue', answerErrors: number) => ({
+    strategy, status: 'ok' as const, probes: 64, passBrief: 0, passSearch: 0, recallBrief: 0, recallSearch: 0,
+    briefTokens: 0, refreshMs: 0, jevInputTokens: 0, costUsd: 0, answerErrors,
+  });
+  const card = { date: '2026-09-26', answerCommand: 'x', cases: 8, probes: 64, rows: [row('no-context', 0), row('recent-dialogue', 68)], results: [] };
+  assert.equal(gate(card, 'recent-dialogue'), false);
+  assert.match(renderScorecard(card), /Release gate \(spec 11\.1\): fails: 68 answering errors \(empty replies or timeouts\); rerun the evaluation\./);
+  assert.equal(gate({ ...card, rows: [row('no-context', 0), row('recent-dialogue', 0)] }, 'recent-dialogue'), true);
 });
