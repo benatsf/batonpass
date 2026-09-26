@@ -7,7 +7,7 @@ import { doctor, ingestCommand, note, resume, search, show, status, type Command
 import { defaultConfig, ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
 import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATEGIES, writeScorecard, type Strategy } from './eval.ts';
-import { runHook } from './hooks.ts';
+import { normalizeEvent, runHook } from './hooks.ts';
 import { applyPlan, defaultCommand, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
 
 export const VERSION = '0.1.0';
@@ -19,6 +19,8 @@ export interface CliIO {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawn(cmd: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }): Promise<number>;
+  /** Runs `baton <args>` in its own process group, outliving this process. */
+  spawnDetached(args: string[], env: NodeJS.ProcessEnv): void;
 }
 
 let stdoutGuarded = false;
@@ -52,6 +54,11 @@ export function defaultIO(): CliIO {
         child.on('exit', (code) => resolve(code ?? 1));
         child.on('error', () => resolve(127));
       }),
+    spawnDetached: (args, env) => {
+      const child = spawnProcess(process.execPath, [process.argv[1]!, ...args], { detached: true, env, stdio: 'ignore' });
+      child.on('error', () => {});
+      child.unref();
+    },
   };
 }
 
@@ -67,6 +74,7 @@ export function captureIO(overrides: Partial<CliIO> = {}): CliIO & { stdout: str
     cwd: process.cwd(),
     env: { ...process.env },
     spawn: async () => 0,
+    spawnDetached: () => {},
     ...overrides,
   };
 }
@@ -79,7 +87,16 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
   try {
     const { values, positionals } = parseArgs({ args, options: { tool: { type: 'string' } }, allowPositionals: true, strict: false });
     const tool = values.tool === 'codex' ? 'codex' : 'claude';
-    const out = await runHook(String(positionals[0] ?? ''), tool, await io.readStdin(), () => makeContext(io.env));
+    const event = String(positionals[0] ?? '');
+    const detachedRun = io.env.BATON_DETACHED === '1';
+    const input = detachedRun ? (io.env.BATON_HOOK_INPUT ?? '') : await io.readStdin();
+    // A tool may end the session right after Stop (`claude -p`, closing the app), killing
+    // its hook processes. The refresh therefore runs in a detached process of its own.
+    if (normalizeEvent(event) === 'stop' && !detachedRun) {
+      io.spawnDetached(['hook', ...args], { ...io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: input });
+      return 0;
+    }
+    const out = await runHook(event, tool, input, () => makeContext(io.env));
     if (out) io.out(`${out}\n`);
   } catch {
     // A hook never fails the calling session.

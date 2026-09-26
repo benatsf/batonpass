@@ -38,7 +38,7 @@ test('installs the exact hook entries for each tool and both skills', () => {
   assert.deepEqual(read(paths.claudeSettings), {
     hooks: {
       SessionStart: [{ matcher: 'startup|resume|clear|compact', hooks: [{ type: 'command', command: `${COMMAND} hook session-start --tool claude`, timeout: 5 }] }],
-      Stop: [{ hooks: [{ type: 'command', command: `${COMMAND} hook stop --tool claude`, timeout: 120, async: true }] }],
+      Stop: [{ hooks: [{ type: 'command', command: `${COMMAND} hook stop --tool claude`, timeout: 30 }] }],
       PreCompact: [{ hooks: [{ type: 'command', command: `${COMMAND} hook pre-compact --tool claude`, timeout: 10 }] }],
     },
   });
@@ -46,7 +46,7 @@ test('installs the exact hook entries for each tool and both skills', () => {
     description: 'Hooks installed by batonpass (baton uninstall removes them)',
     hooks: {
       SessionStart: [{ matcher: 'startup|resume|clear|compact', hooks: [{ type: 'command', command: `${COMMAND} hook session-start --tool codex`, timeout: 5, additionalContextLimit: 2500, statusMessage: 'Loading batonpass context' }] }],
-      Stop: [{ hooks: [{ type: 'command', command: `${COMMAND} hook stop --tool codex`, timeout: 120, async: true }] }],
+      Stop: [{ hooks: [{ type: 'command', command: `${COMMAND} hook stop --tool codex`, timeout: 30 }] }],
       PreCompact: [{ hooks: [{ type: 'command', command: `${COMMAND} hook pre-compact --tool codex`, timeout: 10 }] }],
     },
   });
@@ -119,6 +119,7 @@ test('the Claude Code plugin ships the same hooks and skill', () => {
   const root = join(import.meta.dirname, '..', 'integrations');
   const hooks = readFileSync(join(root, 'claude-plugin', 'hooks', 'hooks.json'), 'utf8');
   for (const event of ['session-start', 'stop', 'pre-compact']) assert.ok(hooks.includes(`"baton hook ${event} --tool claude"`));
+  assert.ok(!hooks.includes('"async"'), 'Stop detaches its own work, so no hook is async');
   assert.equal(readFileSync(join(root, 'claude-plugin', 'skills', 'baton-resume', 'SKILL.md'), 'utf8'), SKILL);
   assert.equal((read(join(root, 'claude-plugin', '.claude-plugin', 'plugin.json')) as { name: string }).name, 'batonpass');
 });

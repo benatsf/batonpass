@@ -73,7 +73,8 @@ function entries(tool: 'claude' | 'codex', command: string): Array<{ event: stri
   if (tool === 'codex') Object.assign(start, { additionalContextLimit: 2500, statusMessage: 'Loading batonpass context' });
   return [
     { event: 'SessionStart', group: { matcher: MATCHER, hooks: [start] } },
-    { event: 'Stop', group: { hooks: [{ type: 'command', command: cmd('stop'), timeout: 120, async: true }] } },
+    // Stop only hands the refresh to a detached process (about 0.1 s), so it runs synchronously.
+    { event: 'Stop', group: { hooks: [{ type: 'command', command: cmd('stop'), timeout: 30 }] } },
     { event: 'PreCompact', group: { hooks: [{ type: 'command', command: cmd('pre-compact'), timeout: 10 }] } },
   ];
 }

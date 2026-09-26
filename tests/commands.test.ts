@@ -153,3 +153,25 @@ test('eval rejects unknown strategies and refuses inside a baton-started agent',
   assert.equal(await inert.run(['eval']), 1);
   assert.match(inert.io.stderr.join(''), /baton eval is disabled inside an agent started by baton/);
 });
+
+test('hook stop hands its work to a detached process and returns at once', async () => {
+  const t = setup();
+  const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+  const stdin = JSON.stringify({ cwd: t.env.repo, transcript_path: '/x.jsonl' });
+  const spawnDetached = (args: string[], env: NodeJS.ProcessEnv) => void calls.push({ args, env });
+  assert.equal(await t.run(['hook', 'stop', '--tool', 'codex'], { readStdin: async () => stdin, spawnDetached }), 0);
+  assert.deepEqual(calls.map((c) => [c.args, c.env.BATON_DETACHED, c.env.BATON_HOOK_INPUT]), [[['hook', 'stop', '--tool', 'codex'], '1', stdin]]);
+  assert.equal(t.env.deps.ledger.events(t.env.projectId).length, 0);
+  assert.equal(t.out(), '');
+});
+
+test('the detached stop run reads its input from the environment and refreshes', async () => {
+  const probe = setup();
+  const transcript = probe.env.deps.readers[0]!.discover()[0]!.path;
+  const t = { ...probe };
+  let detached = 0;
+  const env = { ...probe.io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: JSON.stringify({ cwd: probe.env.repo, transcript_path: transcript }) };
+  assert.equal(await t.run(['hook', 'stop', '--tool', 'codex'], { env, spawnDetached: () => void detached++ }), 0);
+  assert.equal(detached, 0);
+  assert.equal(probe.env.deps.ledger.latestSnapshot(probe.env.projectId)?.seq, 1);
+});
