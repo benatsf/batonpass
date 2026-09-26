@@ -18,7 +18,7 @@ The brief is framed as prior context, not instructions, and always tells the new
 Requires Node.js 24 or later.
 
 ```bash
-npm install -g batonpass
+npm install -g @batonpass/cli
 baton install --dry-run
 baton install
 ```

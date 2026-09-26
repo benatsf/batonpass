@@ -520,7 +520,7 @@ Codex needs no separate integration directory: `baton install` writes its
 
 The README covers the problem, a short demo (a GIF is recorded for the launch), the latest scorecard,
 install
-(`npm i -g batonpass && baton install`), what gets sent where, and
+(`npm i -g @batonpass/cli && baton install`; the unscoped name is refused by npm as too close to `baton-pass`), what gets sent where, and
 configuration. CONTRIBUTING includes "add a reader for your agent" with the
 fixture-first workflow. Versioning follows semver; the transcript formats
 supported are listed per tool version.
