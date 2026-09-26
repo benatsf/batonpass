@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "When may an article be published?", "answer": "never published without its banner", "accept": ["only with its banner", "only when the banner exists", "after the banner exists"] },
+  { "id": "p2", "kind": "identifier", "question": "Where are the banners stored?", "answer": "web/public/blog/banners" },
+  { "id": "p3", "kind": "identifier", "question": "What dimensions must a banner have?", "answer": "1600×900", "accept": ["1600 x 900", "1600 by 900"] },
+  { "id": "p4", "kind": "identifier", "question": "What is the size limit for each inline image?", "answer": "320 KiB", "accept": ["320 KB"] },
+  { "id": "p5", "kind": "identifier", "question": "Which article failed the contract?", "answer": "link-in-bio-vs-linktree" },
+  { "id": "p6", "kind": "verified", "question": "Why did that article fail?", "answer": "lacks a current screenshot", "accept": ["missing screenshot", "no current screenshot", "missing a current screenshot"] },
+  { "id": "p7", "kind": "verified", "question": "How many live articles does the sitemap list?", "answer": "18" },
+  { "id": "p8", "kind": "open", "question": "What is the next step?", "answer": "capture the Linktree pricing page", "accept": ["screenshot the Linktree pricing page"] }
+]

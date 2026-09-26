@@ -347,7 +347,7 @@ provide `session_id`, `transcript_path`, `cwd` and `hook_event_name`.
 | Event | Tool matcher | Mode | Behaviour |
 | --- | --- | --- | --- |
 | `SessionStart` | `startup\|resume\|clear\|compact` | sync, timeout 5 s | Resolve project from `cwd`, read the latest snapshot, return it as `additionalContext` (Claude: `hookSpecificOutput.additionalContext`; Codex: `additionalContext` with `additionalContextLimit` 2500). No ingest, no network. Empty output when there is no snapshot. |
-| `Stop` | all | async, timeout 120 s | Ingest the calling session's `transcript_path` and any other changed sources of the same project, select, render, commit. Uses a per-project lock file; a second concurrent run exits immediately. |
+| `Stop` | all | sync, returns in about 0.1 s, timeout 30 s | Hands the work to a detached background process, so the refresh survives the session ending right after the turn (`claude -p`, closing the app). That process ingests the calling session's `transcript_path` and any other changed sources of the same project, selects, renders and commits. A per-project lock file makes a second concurrent run exit immediately. |
 | `PreCompact` | all | sync, timeout 10 s | Ingest only (no Jev), so nothing is lost before the tool compacts. Codex does not pass `transcript_path` for this event, so its rollout is found by session id. |
 
 Loop and echo prevention: the brief is wrapped in `<baton-context …>`; readers
@@ -392,8 +392,8 @@ CLI:
 
 ## 7. Data flows
 
-1. **Turn ends** (either tool): `Stop` fires asynchronously, takes the project
-   lock, and reads new bytes from every changed source of that project. It
+1. **Turn ends** (either tool): `Stop` starts a detached refresh and returns;
+   the refresh takes the project lock, and reads new bytes from every changed source of that project. It
    redacts and inserts events, runs the selector (Jev if enabled and within
    budget), collects live facts, renders, and commits snapshot `seq + 1`.
 2. **Session starts** (either tool, any source): `SessionStart` reads the

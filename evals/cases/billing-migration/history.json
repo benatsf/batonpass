@@ -1,0 +1,30 @@
+{
+  "description": "Codex starts a billing migration; Claude Code continues it. Early constraints and identifiers fall outside the brief.",
+  "start": "2026-09-20T09:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "codex",
+      "id": "0b1e2c3d-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      "title": "Billing portal migration",
+      "goal": "Move subscriptions to the Stripe customer portal",
+      "turns": [
+        { "user": "We are moving subscriptions from Stripe Checkout to the Stripe customer portal. Standing rule for this project: never run a migration against production without asking me first.", "reply": "Understood: I will ask you before any production migration. Plan: add a create-portal-session edge function, then migrate the plans." },
+        { "user": "Where do plan prices live?", "reply": "Plan prices live in the table public.billing_plans, in the column stripe_price_id." },
+        { "repeat": 14, "user": "Check invoice template {n} against the new portal flow.", "reply": "Invoice template {n} renders correctly with the portal flow." },
+        { "user": "Open a PR for the portal function.", "reply": "Opened PR #212, feat: billing portal sessions. CI is green except the e2e job, which timed out on checkout-return." }
+      ]
+    },
+    {
+      "tool": "claude",
+      "id": "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+      "title": "Billing follow-up",
+      "pr": { "number": 212, "repo": "acme/web", "url": "https://github.com/acme/web/pull/212" },
+      "turns": [
+        { "user": "Continue the billing work. What failed last time?", "reply": "The e2e job timed out on checkout-return in PR #212. I raised the Playwright timeout in tests/e2e/checkout-return.spec.ts to 60 seconds and the job passes now." },
+        { "repeat": 12, "user": "Review migration step {n} for idempotency.", "reply": "Migration step {n} is idempotent and safe to re-run." },
+        { "user": "Deploy the portal function to staging only.", "reply": "Deployed create-portal-session to staging as version 7. Production is untouched. The staging smoke test returned HTTP 200." },
+        { "user": "What is left?", "reply": "Left: migrate the 3 legacy annual plans, then ask for your approval before the production migration." }
+      ]
+    }
+  ]
+}

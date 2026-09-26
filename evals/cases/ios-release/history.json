@@ -1,0 +1,27 @@
+{
+  "description": "Claude Code prepares an iOS release; Codex handles the rejection. Tests identifiers across a review cycle.",
+  "start": "2026-09-15T10:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "claude",
+      "id": "c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f",
+      "title": "iOS 2.3 release",
+      "turns": [
+        { "user": "Prepare the iOS 2.3 release. Rule: never bump the major version without asking me.", "reply": "Understood, the major version stays unless you approve. The bundle id is is.liink.app and the current version is 2.3.0." },
+        { "user": "Upload a TestFlight build.", "reply": "Uploaded build 2.3.0 (412) to TestFlight. Export compliance is set to no custom encryption." },
+        { "repeat": 12, "user": "Check screenshot set {n} for the App Store listing.", "reply": "Screenshot set {n} matches the 6.9-inch display requirements." },
+        { "user": "Submit for review.", "reply": "Submitted 2.3.0 (412) for App Store review. The review notes explain how to open the link editor without an account." }
+      ]
+    },
+    {
+      "tool": "codex",
+      "id": "d4e5f6a7-b8c9-4d0e-9f1a-3b4c5d6e7f80",
+      "title": "iOS release follow-up",
+      "turns": [
+        { "user": "What did Apple say?", "reply": "Apple rejected 2.3.0 (412) under guideline 4.8: Sign in with Apple is missing next to Google sign-in." },
+        { "repeat": 10, "user": "Test sign-in path {n} on the simulator.", "reply": "Sign-in path {n} works on the iPhone 17 Pro simulator." },
+        { "user": "Fix it and resubmit.", "reply": "Added Sign in with Apple and resubmitted as build 2.3.0 (415). Status: waiting for review." }
+      ]
+    }
+  ]
+}

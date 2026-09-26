@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "What must never be done with a failing test?", "answer": "skipped", "accept": ["skip"] },
+  { "id": "p2", "kind": "identifier", "question": "Which test was flaky?", "answer": "tests/schedule/next-run.test.ts" },
+  { "id": "p3", "kind": "identifier", "question": "Which seed reproduces the failure?", "answer": "8841" },
+  { "id": "p4", "kind": "identifier", "question": "Which time zone reproduces the failure?", "answer": "Pacific/Auckland" },
+  { "id": "p5", "kind": "decision", "question": "What was the root cause?", "answer": "local time zone instead of UTC", "accept": ["local time zone", "local time instead of UTC"] },
+  { "id": "p6", "kind": "identifier", "question": "Which commit fixed it?", "answer": "9f3c2ab" },
+  { "id": "p7", "kind": "verified", "question": "How often does the fixed test pass under that time zone?", "answer": "200 of 200", "accept": ["200/200", "200 out of 200"] },
+  { "id": "p8", "kind": "open", "question": "Which other test might be flaky?", "answer": "tests/billing/proration.test.ts" }
+]

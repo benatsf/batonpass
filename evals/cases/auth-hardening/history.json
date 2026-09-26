@@ -1,0 +1,30 @@
+{
+  "description": "Claude Code hardens auth and sets a language rule; Codex continues. Tests the reverse direction and a non-English reply.",
+  "start": "2026-09-21T08:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "claude",
+      "id": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+      "title": "Auth hardening",
+      "turns": [
+        { "user": "Harden the auth flow. Please answer me in French from now on in this project, and never disable row level security on any table.", "reply": "Compris. Je répondrai en français et je ne désactiverai jamais la row level security (RLS) sur aucune table." },
+        { "user": "Which function leaked private profile columns?", "reply": "La fonction get_public_profile renvoyait les colonnes privées email et stripe_customer_id." },
+        { "repeat": 12, "user": "Audit policy {n} on the profiles table.", "reply": "La politique {n} est correcte." },
+        { "user": "Fix get_public_profile.", "reply": "Corrigé dans la migration 20260921_fix_public_profile.sql : la fonction ne renvoie plus que username, avatar_url et bio." }
+      ]
+    },
+    {
+      "tool": "codex",
+      "id": "3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a",
+      "title": "Auth follow-up",
+      "goal": "Ship the auth hardening",
+      "compactAfterTurn": 3,
+      "turns": [
+        { "user": "Continue the auth hardening. Did the leaked-password protection get enabled?", "reply": "Not yet: leaked-password protection is still off in the Supabase dashboard; it needs a Pro plan, which is an open decision for you." },
+        { "user": "Rotate the service role key.", "reply": "Rotated the service role key on staging only; production rotation is pending your go-ahead because three Vercel projects use the key." },
+        { "repeat": 12, "user": "Recheck advisor warning {n}.", "reply": "Advisor warning {n} is resolved." },
+        { "user": "Status?", "reply": "Status: 14 of 16 advisor warnings resolved; the 2 remaining are SECURITY DEFINER functions scheduled for review." }
+      ]
+    }
+  ]
+}

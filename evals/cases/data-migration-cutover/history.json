@@ -1,0 +1,27 @@
+{
+  "description": "Claude Code plans a database cutover; Codex runs the dry run. Tests times, counts and a rollback command.",
+  "start": "2026-09-18T12:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "claude",
+      "id": "1b2c3d4e-5f60-4172-8839-4a5b6c7d8e9f",
+      "title": "Orders cutover",
+      "turns": [
+        { "user": "Plan the orders table cutover to the new cluster. Rule: no writes during the freeze window, 22:00 to 23:00 UTC.", "reply": "Noted: no writes between 22:00 and 23:00 UTC. The cutover is scheduled for 2026-10-03 at 22:15 UTC." },
+        { "user": "How many rows?", "reply": "The source orders table has 4,812,331 rows; the replica matched that count at 14:02 UTC." },
+        { "repeat": 12, "user": "Compare checksum batch {n}.", "reply": "Checksum batch {n} matches the source." },
+        { "user": "Rollback plan?", "reply": "Rollback: run make cutover-rollback, which points DATABASE_URL back to the old primary." }
+      ]
+    },
+    {
+      "tool": "codex",
+      "id": "2c3d4e5f-6071-4283-994a-5b6c7d8e9fa0",
+      "title": "Cutover follow-up",
+      "turns": [
+        { "user": "Did the dry run pass?", "reply": "The dry run passed in 11 minutes; replication lag peaked at 3.2 seconds." },
+        { "repeat": 10, "user": "Check index {n} on the new cluster.", "reply": "Index {n} exists and is valid." },
+        { "user": "What is still blocking?", "reply": "Blocking: the payments service still pins the old host in config/payments.yml." }
+      ]
+    }
+  ]
+}

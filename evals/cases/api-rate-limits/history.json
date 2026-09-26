@@ -1,0 +1,34 @@
+{
+  "description": "Three sessions (Claude Code, Codex, Claude Code) adding API rate limits. Tests numbers and names spread across sessions.",
+  "start": "2026-09-17T09:00:00.000Z",
+  "sessions": [
+    {
+      "tool": "claude",
+      "id": "5f607182-93a4-45b6-8c7d-8e9fa0b1c2d3",
+      "title": "Rate limits",
+      "turns": [
+        { "user": "Add rate limiting to the public API. Rule: authenticated partners must never be limited below 600 requests per minute.", "reply": "Understood: partner keys keep at least 600 requests per minute. Anonymous clients get 60 requests per minute." },
+        { "user": "Where are the counters stored?", "reply": "Counters live in Redis under the key prefix rl:v2: with a 60-second TTL." },
+        { "repeat": 12, "user": "Load test endpoint group {n}.", "reply": "Endpoint group {n} stays under 50 ms p95 with limits on." }
+      ]
+    },
+    {
+      "tool": "codex",
+      "id": "60718293-a4b5-46c7-9d8e-9fa0b1c2d3e4",
+      "title": "Rate limit headers",
+      "turns": [
+        { "user": "Which headers do clients see?", "reply": "Clients see X-RateLimit-Remaining, and Retry-After on 429 responses." },
+        { "repeat": 10, "user": "Verify that client SDK {n} handles 429.", "reply": "SDK {n} waits for Retry-After before retrying." }
+      ]
+    },
+    {
+      "tool": "claude",
+      "id": "718293a4-b5c6-47d8-8e9f-a0b1c2d3e4f5",
+      "title": "Rate limit rollout",
+      "turns": [
+        { "user": "Roll it out.", "reply": "Rolled out to 10% of traffic behind the flag api_rate_limits_v2." },
+        { "user": "What is open?", "reply": "Open: the partner allowlist still misses two partner keys, acme-prod and globex-prod." }
+      ]
+    }
+  ]
+}

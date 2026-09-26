@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "When are writes forbidden?", "answer": "22:00 to 23:00 UTC", "accept": ["between 22:00 and 23:00 UTC"] },
+  { "id": "p2", "kind": "identifier", "question": "When is the cutover scheduled?", "answer": "2026-10-03 22:15 UTC" },
+  { "id": "p3", "kind": "identifier", "question": "How many rows does the source orders table have?", "answer": "4,812,331", "accept": ["4812331"] },
+  { "id": "p4", "kind": "identifier", "question": "Which command rolls the cutover back?", "answer": "make cutover-rollback" },
+  { "id": "p5", "kind": "verified", "question": "How long did the dry run take?", "answer": "11 minutes" },
+  { "id": "p6", "kind": "verified", "question": "What was the peak replication lag?", "answer": "3.2 seconds", "accept": ["3.2 s"] },
+  { "id": "p7", "kind": "open", "question": "What is still blocking the cutover?", "answer": "payments service", "accept": ["config/payments.yml"] },
+  { "id": "p8", "kind": "identifier", "question": "Which environment variable does the rollback switch?", "answer": "DATABASE_URL" }
+]

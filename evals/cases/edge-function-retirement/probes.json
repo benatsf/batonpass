@@ -1,0 +1,10 @@
+[
+  { "id": "p1", "kind": "constraint", "question": "What must be done instead of deleting a function outright?", "answer": "410 stub", "accept": ["stub that returns 410"] },
+  { "id": "p2", "kind": "identifier", "question": "How many functions were deployed before the retirement?", "answer": "23" },
+  { "id": "p3", "kind": "identifier", "question": "Where are the backups of the functions?", "answer": "~/backups/edge-2026-09-26/prod/" },
+  { "id": "p4", "kind": "decision", "question": "Why can the public anon key call functions that have verify_jwt enabled?", "answer": "verify_jwt accepts the anon JWT", "accept": ["the gateway accepts the anon JWT", "anon JWT is accepted"] },
+  { "id": "p5", "kind": "identifier", "question": "Which function was the riskiest?", "answer": "fetch-url-metadata" },
+  { "id": "p6", "kind": "verified", "question": "What risk did that function carry?", "answer": "server-side request forgery", "accept": ["SSRF"] },
+  { "id": "p7", "kind": "verified", "question": "What do the retired functions return now?", "answer": "410", "accept": ["410 Gone"] },
+  { "id": "p8", "kind": "open", "question": "What remains open?", "answer": "delete the 12 retired functions", "accept": ["delete 12 retired functions", "delete the retired functions from the dashboard"] }
+]

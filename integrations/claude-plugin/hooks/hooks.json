@@ -1,0 +1,10 @@
+{
+  "description": "batonpass: inject the latest project context at session start and record every turn",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "baton hook session-start --tool claude", "timeout": 5 }] }
+    ],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "baton hook stop --tool claude", "timeout": 30 }] }],
+    "PreCompact": [{ "hooks": [{ "type": "command", "command": "baton hook pre-compact --tool claude", "timeout": 10 }] }]
+  }
+}
