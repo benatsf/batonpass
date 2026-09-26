@@ -1,0 +1,25 @@
+{
+  "name": "batonpass",
+  "version": "0.1.0",
+  "description": "Automatic, local, verbatim session handoff between Codex and Claude Code.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "baton": "bin/baton.js" },
+  "files": ["bin", "dist", "integrations", "evals/cases", "README.md", "LICENSE"],
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-reporter=spec \"tests/*.test.ts\"",
+    "check:release": "node --test --test-reporter=spec \"release/*.test.ts\"",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "fast-jev-compaction": "^0.4.1",
+    "smol-toml": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "~5.9.3"
+  }
+}
