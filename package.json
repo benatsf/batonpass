@@ -1,5 +1,5 @@
 {
-  "name": "batonpass",
+  "name": "@batonpass/cli",
   "version": "0.1.0",
   "description": "Automatic, local, verbatim session handoff between Codex and Claude Code.",
   "license": "MIT",
@@ -53,5 +53,8 @@
   "devDependencies": {
     "@types/node": "^24.19.0",
     "typescript": "~5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
