@@ -343,9 +343,10 @@ set `BATON_HOOK=1`; `baton` refuses to spawn agents while it is set.
 
 `baton install [--claude] [--codex] [--dry-run]`:
 
-- Claude Code: installs a plugin (`.claude-plugin/plugin.json` plus
-  `hooks/hooks.json` with command hooks) through a local marketplace, or, with
-  `--settings`, merges the hooks into `~/.claude/settings.json`.
+- Claude Code: merges command hooks into `~/.claude/settings.json`. The
+  repository also ships a Claude Code plugin manifest
+  (`integrations/claude-plugin/`) for users who prefer a marketplace install;
+  both call the same `baton hook` entry point.
 - Codex: merges hook entries into `~/.codex/hooks.json` (created when absent).
 - Both: installs the `baton-resume` skill (`~/.claude/skills/baton-resume/`,
   `~/.codex/skills/baton-resume/`), which tells the agent to run
