@@ -45,9 +45,9 @@ function sessionStart(ctx: Context, input: HookInput): string {
 async function stop(ctx: Context, input: HookInput): Promise<void> {
   if (!input.cwd) return;
   const project = ctx.resolve(input.cwd);
-  const paths = new Set(ctx.ledger.sourcePathsForProject(project.id));
-  if (input.transcript_path) paths.add(input.transcript_path);
-  const result = await refresh(ctx, { projectId: project.id, root: project.root, ingest: { onlyPaths: [...paths] } });
+  // Ingest every changed transcript, not only this project's known ones: a session whose own
+  // Stop never ran (hooks not yet trusted, app closed) is still picked up. Unchanged files cost a stat.
+  const result = await refresh(ctx, { projectId: project.id, root: project.root, ingest: {} });
   ctx.log('stop', {
     status: result.status,
     seq: result.seq,

@@ -96,3 +96,10 @@ test('session-start stays fast (p95 under 300 ms in process)', async () => {
   times.sort((a, b) => a - b);
   assert.ok(times[18]! < 300, `p95 ${times[18]} ms`);
 });
+
+test('Stop also ingests transcripts of the project it has not seen yet', async () => {
+  const { make, input, claudePath } = setup();
+  await runHook('Stop', 'claude', input({ session_id: CLAUDE, transcript_path: claudePath }), make);
+  const context = JSON.parse(await runHook('SessionStart', 'codex', input({}), make)).hookSpecificOutput.additionalContext as string;
+  assert.ok(context.includes('Checkout now uses the shared helper.'), 'the Codex session whose own Stop never ran');
+});

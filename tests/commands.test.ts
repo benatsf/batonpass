@@ -175,3 +175,13 @@ test('the detached stop run reads its input from the environment and refreshes',
   assert.equal(detached, 0);
   assert.equal(probe.env.deps.ledger.latestSnapshot(probe.env.projectId)?.seq, 1);
 });
+
+test('a large Stop payload is trimmed to the fields the refresh needs', async () => {
+  const t = setup();
+  const calls: Array<{ env: NodeJS.ProcessEnv }> = [];
+  const payload = { session_id: 's1', transcript_path: '/x.jsonl', cwd: t.env.repo, hook_event_name: 'Stop', last_assistant_message: 'x'.repeat(1_000_000) };
+  await t.run(['hook', 'stop', '--tool', 'codex'], { readStdin: async () => JSON.stringify(payload), spawnDetached: (_args, env) => void calls.push({ env }) });
+  const input = calls[0]!.env.BATON_HOOK_INPUT!;
+  assert.ok(input.length < 1000);
+  assert.deepEqual(JSON.parse(input), { cwd: t.env.repo, transcript_path: '/x.jsonl', session_id: 's1' });
+});

@@ -83,6 +83,16 @@ export type ContextFactory = (env: NodeJS.ProcessEnv) => Context;
 
 const COMMANDS: Record<string, Command> = { status, show, ingest: ingestCommand, search, note, resume, doctor };
 
+/** Only what the refresh needs: environment variables are size-limited (128 KiB each on Linux). */
+function stopInput(stdin: string): string {
+  try {
+    const { cwd, transcript_path, session_id } = JSON.parse(stdin) as Record<string, unknown>;
+    return JSON.stringify({ cwd, transcript_path, session_id });
+  } catch {
+    return '';
+  }
+}
+
 async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactory): Promise<number> {
   try {
     const { values, positionals } = parseArgs({ args, options: { tool: { type: 'string' } }, allowPositionals: true, strict: false });
@@ -93,7 +103,7 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
     // A tool may end the session right after Stop (`claude -p`, closing the app), killing
     // its hook processes. The refresh therefore runs in a detached process of its own.
     if (normalizeEvent(event) === 'stop' && !detachedRun) {
-      io.spawnDetached(['hook', ...args], { ...io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: input });
+      io.spawnDetached(['hook', ...args], { ...io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: stopInput(input) });
       return 0;
     }
     const out = await runHook(event, tool, input, () => makeContext(io.env));
