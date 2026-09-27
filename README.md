@@ -4,6 +4,8 @@ Automatic, local, verbatim session handoff between Codex and Claude Code.
 
 Finish a turn in Codex, open Claude Code in the same repository, and it already knows what Codex just did: the last exchanges word for word, the goal, the pull requests and the state of the branch. The same works from Claude Code to Codex. No command to remember, no hosted service, no model-written summary.
 
+![A Codex session, then a fresh Claude Code session that already knows what happened in it](docs/demo.gif)
+
 ## How it works
 
 - **`Stop` hook** (both tools, runs in the background): reads the new lines of the session transcript, removes secrets, stores the dialogue in a local SQLite ledger (`~/.baton/baton.db`) and renders a numbered snapshot of the project.
