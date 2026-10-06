@@ -7,7 +7,7 @@ import { staleSeconds, type Context } from './context.ts';
 import { ingest } from './ingest.ts';
 import { hookStatus, installPaths } from './install.ts';
 import type { MessageRow } from './ledger.ts';
-import { detectAgent, isAgent, MAX_MESSAGE_CHARS, otherAgent } from './messages.ts';
+import { detectAgent, isAgent, MAX_MESSAGE_CHARS, otherAgent, renderMessages } from './messages.ts';
 import { redact } from './redact.ts';
 import { withStaleWarning } from './render.ts';
 import { abridge, formatTime, toolLabel } from './select/dialogue.ts';
@@ -240,11 +240,16 @@ export const inbox: Command = async (ctx, io, args) => {
     return 0;
   }
   const tz = ctx.config.render.timeZone;
-  const cutoff = new Date(now.getTime() - ctx.config.messages.maxAgeHours * 3_600_000).toISOString();
-  const pending = list.filter((m) => !m.deliveredAt || ackedIds.has(m.id)).length;
-  io.out(`Messages${where} (${pending} pending):\n`);
-  for (const m of list) {
-    io.out(`\n#${m.id} · ${formatTime(m.createdAt, tz)} · from ${party(m.sender)} to ${party(m.recipient)} · ${messageState(m, ackedIds.has(m.id), cutoff, tz)}\n${m.text}\n`);
+  if (detected) {
+    // Inside an agent's shell this output reaches a model: frame the messages as data, as the hooks do.
+    io.out(`${renderMessages(list, tool ?? null, tz)}\n`);
+  } else {
+    const cutoff = new Date(now.getTime() - ctx.config.messages.maxAgeHours * 3_600_000).toISOString();
+    const pending = list.filter((m) => !m.deliveredAt || ackedIds.has(m.id)).length;
+    io.out(`Messages${where} (${pending} pending):\n`);
+    for (const m of list) {
+      io.out(`\n#${m.id} · ${formatTime(m.createdAt, tz)} · from ${party(m.sender)} to ${party(m.recipient)} · ${messageState(m, ackedIds.has(m.id), cutoff, tz)}\n${m.text}\n`);
+    }
   }
   if (acked.length) io.out(`\nMarked ${acked.length} message${acked.length === 1 ? '' : 's'} as read; hooks will not show ${acked.length === 1 ? 'it' : 'them'} again.\n`);
   return 0;
