@@ -2,7 +2,7 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.2
 
 - `baton inbox` run inside Codex or Claude Code prints messages in the same `<baton-messages>` data framing as the hooks, so message text reaches the agent as relayed data rather than bare text. In your own terminal it is still a plain list.
 - `docs/waking-idle-agents.md`: what `codex queue` does to idle, busy, closed and unknown Codex sessions, and the agreed plan for waking an idle agent (not built yet).
