@@ -16,6 +16,8 @@ const WRAPPED_PREFIXES = [
   '<heartbeat',
   '<external_codex_apps_open_page',
   '<baton-context',
+  // A Stop hook's block reason, fed back to the model as a user message.
+  '<hook_prompt',
 ];
 /**
  * Kinds that may stand for something the user typed. Codex labels each content item of a message

@@ -6,6 +6,8 @@ import type { CliIO } from './cli.ts';
 import { staleSeconds, type Context } from './context.ts';
 import { ingest } from './ingest.ts';
 import { hookStatus, installPaths } from './install.ts';
+import type { MessageRow } from './ledger.ts';
+import { detectAgent, isAgent, MAX_MESSAGE_CHARS, otherAgent } from './messages.ts';
 import { redact } from './redact.ts';
 import { withStaleWarning } from './render.ts';
 import { abridge, formatTime, toolLabel } from './select/dialogue.ts';
@@ -121,6 +123,130 @@ export const note: Command = async (ctx, io, args) => {
   ctx.ledger.addNote(id, clean.text, nowOf(ctx).toISOString());
   const result = await refresh(ctx, { projectId: id, root: values.project ? null : here.root, ingest: false });
   io.out(`Pinned to ${id}${result.status === 'committed' ? ` (snapshot #${result.seq})` : ''}.\n`);
+  return 0;
+};
+
+const SEND_USAGE = 'Usage: baton send --to <codex|claude> [--from codex|claude|user] [--project id] <text…>\n';
+const SEND_OPTIONS = new Set(['to', 'from', 'project']);
+
+/**
+ * Only --to, --from and --project are options, anywhere; every other word is message text, so a
+ * message may start with "-" (bullet lists, "-1 failing"). After `--`, everything is text.
+ */
+function parseSendArgs(args: string[]): { options: Record<string, string>; text: string } | null {
+  const options: Record<string, string> = {};
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--') {
+      words.push(...args.slice(i + 1));
+      break;
+    }
+    const option = /^--([a-z]+)(?:=([\s\S]*))?$/.exec(arg);
+    if (!option || !SEND_OPTIONS.has(option[1]!)) {
+      words.push(arg);
+      continue;
+    }
+    const value = option[2] ?? args[++i];
+    if (value === undefined) return null;
+    options[option[1]!] = value;
+  }
+  return { options, text: words.join(' ').trim() };
+}
+
+export const send: Command = async (ctx, io, args) => {
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) {
+    io.out(SEND_USAGE);
+    return 0;
+  }
+  const parsed = parseSendArgs(args);
+  if (!parsed) {
+    io.err(SEND_USAGE);
+    return 2;
+  }
+  const { options, text } = parsed;
+  const detected = detectAgent(io.env);
+  if (!options.from && detected === 'both') {
+    io.err('Both Codex and Claude Code variables are set here (one agent was started from the other), so the sender is unknown: pass --from codex or --from claude.\n');
+    return 2;
+  }
+  const sender = options.from ?? (isAgent(detected) ? detected : 'user');
+  if (!isAgent(sender) && sender !== 'user') {
+    io.err(`--from must be codex, claude or user.\n${SEND_USAGE}`);
+    return 2;
+  }
+  // From inside an agent, the recipient defaults to the other one.
+  const recipient = options.to ?? (isAgent(sender) ? otherAgent(sender) : undefined);
+  if (!isAgent(recipient) || !text) {
+    io.err(SEND_USAGE);
+    return 2;
+  }
+  if (recipient === sender) {
+    io.err(`A message from ${toolLabel(sender)} to ${toolLabel(recipient)} would come back to the sender at its next tool call. Pass --from user if you are not the agent.\n`);
+    return 2;
+  }
+  if (text.length > MAX_MESSAGE_CHARS) {
+    io.err(`The message is ${text.length} characters; the limit is ${MAX_MESSAGE_CHARS}. Keep it short, or point to a file.\n`);
+    return 2;
+  }
+  const id = options.project ?? ctx.resolve(io.cwd).id;
+  const clean = redact(text);
+  ctx.ledger.addRedactions(clean.findings);
+  const messageId = ctx.ledger.addMessage(id, { recipient, sender, text: clean.text, createdAt: nowOf(ctx).toISOString() });
+  const to = toolLabel(recipient);
+  io.out(`Message #${messageId} queued for ${to} in ${id}. ${to} sees it at its next prompt, tool call or turn end.\n`);
+  const redacted = Object.values(clean.findings).reduce((sum, n) => sum + n, 0);
+  if (redacted) io.out(`Redacted ${redacted} secret-looking value${redacted === 1 ? '' : 's'} before storing.\n`);
+  return 0;
+};
+
+const party = (name: string) => (isAgent(name) ? toolLabel(name) : 'the user');
+
+function messageState(m: MessageRow, ackedNow: boolean, cutoff: string, tz: string): string {
+  if (ackedNow) return 'read now';
+  if (m.deliveredAt) return `delivered ${formatTime(m.deliveredAt, tz)} (${m.deliveredVia})`;
+  return m.createdAt < cutoff ? 'pending, too old for hooks to deliver' : 'pending';
+}
+
+export const inbox: Command = async (ctx, io, args) => {
+  const { values } = parseArgs({
+    args,
+    options: { tool: { type: 'string' }, ack: { type: 'boolean' }, all: { type: 'boolean' }, project: { type: 'string' }, json: { type: 'boolean' } },
+  });
+  if (values.tool !== undefined && !isAgent(values.tool)) {
+    io.err('--tool must be codex or claude.\n');
+    return 2;
+  }
+  const detected = detectAgent(io.env);
+  const tool = values.tool ?? (isAgent(detected) ? detected : undefined);
+  if (values.ack && !tool) {
+    io.err('--ack needs --tool codex or --tool claude, so it never marks the other agent\'s messages as read.\n');
+    return 2;
+  }
+  const id = values.project ?? ctx.resolve(io.cwd).id;
+  const now = nowOf(ctx);
+  const acked = values.ack && tool ? ctx.ledger.claimMessages(id, tool, 'inbox', now.toISOString()) : [];
+  const ackedIds = new Set(acked.map((m) => m.id));
+  const list = values.all
+    ? ctx.ledger.messages(id, { recipient: tool, limit: 50 })
+    : values.ack ? acked : ctx.ledger.messages(id, { recipient: tool, pendingOnly: true });
+  if (values.json) {
+    io.out(`${JSON.stringify(list, null, 2)}\n`);
+    return 0;
+  }
+  const where = `${tool ? ` for ${toolLabel(tool)}` : ''} in ${id}`;
+  if (!list.length) {
+    io.out(`No ${values.all ? '' : 'pending '}messages${where}.\n`);
+    return 0;
+  }
+  const tz = ctx.config.render.timeZone;
+  const cutoff = new Date(now.getTime() - ctx.config.messages.maxAgeHours * 3_600_000).toISOString();
+  const pending = list.filter((m) => !m.deliveredAt || ackedIds.has(m.id)).length;
+  io.out(`Messages${where} (${pending} pending):\n`);
+  for (const m of list) {
+    io.out(`\n#${m.id} · ${formatTime(m.createdAt, tz)} · from ${party(m.sender)} to ${party(m.recipient)} · ${messageState(m, ackedIds.has(m.id), cutoff, tz)}\n${m.text}\n`);
+  }
+  if (acked.length) io.out(`\nMarked ${acked.length} message${acked.length === 1 ? '' : 's'} as read; hooks will not show ${acked.length === 1 ? 'it' : 'them'} again.\n`);
   return 0;
 };
 

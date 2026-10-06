@@ -45,7 +45,18 @@ export interface ProjectSummary {
 
 export type SnapshotBody = Omit<Snapshot, 'projectId' | 'seq'>;
 
-const SCHEMA_VERSION = 2;
+export interface MessageRow {
+  id: number;
+  projectId: string;
+  recipient: string;
+  sender: string;
+  createdAt: string;
+  text: string;
+  deliveredAt: string | null;
+  deliveredVia: string | null;
+}
+
+const SCHEMA_VERSION = 3;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources (
   path TEXT PRIMARY KEY, tool TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL,
@@ -81,6 +92,10 @@ CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, project_id TEXT NOT NU
 CREATE TABLE IF NOT EXISTS jev_spend (day TEXT PRIMARY KEY, input_tokens INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS redactions (rule TEXT PRIMARY KEY, count INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY, project_id TEXT NOT NULL, recipient TEXT NOT NULL, sender TEXT NOT NULL,
+  created_at TEXT NOT NULL, text TEXT NOT NULL, delivered_at TEXT, delivered_via TEXT);
+CREATE INDEX IF NOT EXISTS messages_pending ON messages(recipient, delivered_at, project_id);
 `;
 
 type Row = Record<string, unknown>;
@@ -97,6 +112,19 @@ function toEvent(r: Row): StoredEvent {
     kind: String(r.kind) as EventKind,
     text: String(r.text),
     meta: json(r.meta_json, {}),
+  };
+}
+
+function toMessage(r: Row): MessageRow {
+  return {
+    id: Number(r.id),
+    projectId: String(r.project_id),
+    recipient: String(r.recipient),
+    sender: String(r.sender),
+    createdAt: String(r.created_at),
+    text: String(r.text),
+    deliveredAt: (r.delivered_at as string | null) ?? null,
+    deliveredVia: (r.delivered_via as string | null) ?? null,
   };
 }
 
@@ -159,6 +187,7 @@ export class Ledger {
     this.transaction(() => {
       rewrite('events', 'id', ['text', 'meta_json'], ['meta_json']);
       rewrite('notes', 'id', ['text']);
+      rewrite('messages', 'id', ['text']);
       rewrite('sessions', 'rowid', ['title']);
       rewrite('snapshots', 'rowid', ['brief_md', 'full_md', 'covers_json'], ['covers_json']);
       this.db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('redactor_version', ?)").run(String(version));
@@ -300,6 +329,51 @@ export class Ledger {
     }));
   }
 
+  addMessage(projectId: string, m: { recipient: string; sender: string; text: string; createdAt: string }): number {
+    const result = this.db
+      .prepare('INSERT INTO messages (project_id, recipient, sender, created_at, text) VALUES (?, ?, ?, ?, ?)')
+      .run(projectId, m.recipient, m.sender, m.createdAt, m.text);
+    return Number(result.lastInsertRowid);
+  }
+
+  /** Cheap check before resolving a project: any undelivered message for this recipient sent since `since`. */
+  hasPendingMessages(recipient: string, since: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM messages WHERE recipient = ? AND delivered_at IS NULL AND created_at >= ? LIMIT 1').get(recipient, since));
+  }
+
+  /**
+   * Marks pending messages as delivered and returns them, oldest first: those sent since `since`,
+   * as many as fit in `maxChars` counting `perMessage` extra characters each (always at least one).
+   * One UPDATE statement, so concurrent callers never receive the same message.
+   */
+  claimMessages(
+    projectId: string,
+    recipient: string,
+    via: string,
+    now: string,
+    options: { since?: string; maxChars?: number; perMessage?: number } = {},
+  ): MessageRow[] {
+    const max = options.maxChars ?? -1;
+    const rows = this.db
+      .prepare(`UPDATE messages SET delivered_at = ?, delivered_via = ?
+        WHERE delivered_at IS NULL AND id IN (
+          SELECT id FROM (
+            SELECT id, row_number() OVER (ORDER BY id) AS n, sum(length(text) + ?) OVER (ORDER BY id) AS total FROM messages
+            WHERE project_id = ? AND recipient = ? AND delivered_at IS NULL AND created_at >= ?)
+          WHERE n = 1 OR ? < 0 OR total <= ?)
+        RETURNING *`)
+      .all(now, via, options.perMessage ?? 0, projectId, recipient, options.since ?? '', max, max) as Row[];
+    return rows.map(toMessage).sort((a, b) => a.id - b.id);
+  }
+
+  messages(projectId: string, filter: { recipient?: string; pendingOnly?: boolean; limit?: number } = {}): MessageRow[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM (SELECT * FROM messages WHERE project_id = ? AND (? IS NULL OR recipient = ?) AND (? = 0 OR delivered_at IS NULL)
+        ORDER BY id DESC LIMIT ?) ORDER BY id`)
+      .all(projectId, filter.recipient ?? null, filter.recipient ?? null, filter.pendingOnly ? 1 : 0, filter.limit ?? -1) as Row[];
+    return rows.map(toMessage);
+  }
+
   commitSnapshot(projectId: string, build: (seq: number) => SnapshotBody): number {
     return this.transaction(() => {
       const r = this.db.prepare('SELECT coalesce(max(seq), 0) + 1 AS seq FROM snapshots WHERE project_id = ?').get(projectId) as Row;
@@ -359,6 +433,7 @@ export class Ledger {
     this.transaction(() => {
       this.db.prepare('DELETE FROM events WHERE ts < ?').run(cutoff);
       this.db.prepare('DELETE FROM sessions WHERE last_ts < ?').run(cutoff);
+      this.db.prepare('DELETE FROM messages WHERE created_at < ?').run(cutoff);
       this.db
         .prepare(`DELETE FROM snapshots WHERE (project_id, seq) IN (
           SELECT project_id, seq FROM (SELECT project_id, seq, row_number() OVER (PARTITION BY project_id ORDER BY seq DESC) AS n FROM snapshots) WHERE n > ?)`)
