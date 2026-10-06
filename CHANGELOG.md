@@ -11,6 +11,7 @@ All notable changes follow [Semantic Versioning](https://semver.org/).
 - `baton install` puts its hooks back at the same position among yours on a reinstall; Codex keys hook trust by position.
 - The Codex reader skips Stop-hook continuations (`<hook_prompt>`), which are not user prompts.
 - Ledger schema 3 (new `messages` table, added in place). Earlier versions refuse to open it.
+- The Codex reader no longer records scheduled heartbeats (`<heartbeat>`) or opened app pages (`<external_codex_apps_open_page>`) as user prompts, nor any user message whose Codex `content_item_kinds` all mark harness context. Rows already in the ledger are not rewritten.
 
 ## 0.1.0
 
