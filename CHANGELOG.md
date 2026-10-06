@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- The Codex reader no longer records scheduled heartbeats (`<heartbeat>`) or opened app pages (`<external_codex_apps_open_page>`) as user prompts, nor any user message whose Codex `content_item_kinds` all mark harness context. Rows already in the ledger are not rewritten.
+
 ## 0.1.0
 
 - Codex and Claude Code transcript readers, incremental and read-only.
