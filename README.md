@@ -44,7 +44,7 @@ Existing history is read on the first `baton ingest` (the last 30 days, at most 
 | `baton resume codex` / `baton resume claude` | Start the other tool here with the brief as its first prompt |
 | `baton doctor [--jev]` | Check Node, hooks, transcripts, ledger health and redaction counts |
 | `baton eval` | Run the recall evaluation and write a scorecard |
-| `baton install` / `baton uninstall` | Add or remove the hooks and the skill |
+| `baton install` / `baton uninstall` | Add or remove the hooks and the skills |
 
 ## Messages between agents
 
@@ -75,7 +75,8 @@ Limits:
 - With two sessions of the same tool open on one project, whichever reaches a hook boundary first gets the message.
 - Codex runs the new `UserPromptSubmit` and `PostToolUse` hooks only after you trust them in `/hooks`. Until then, the `Stop` hook you already trusted still delivers at the end of each turn.
 - Codex shows a `Stop` reason to the model XML-escaped inside `<hook_prompt>`; the model still reads it.
-- Each tool call pays about 50 to 80 ms for the `PostToolUse` check: one Node start and one indexed query, with no git call when nothing is waiting.
+- Each tool call pays about 50 to 80 ms for the `PostToolUse` check: one Node start and one indexed query. Git runs only while a message for that tool is waiting, in any project.
+- Outside a git repository, the project is the exact directory: send from the directory the agents were started in.
 
 Verified in live sessions with Claude Code 2.1.284 and Codex CLI 0.160.0 (all three delivery points in each), and against the Codex hook schema in `openai/codex` rust-v0.160.1.
 

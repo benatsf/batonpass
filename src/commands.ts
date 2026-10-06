@@ -127,21 +127,56 @@ export const note: Command = async (ctx, io, args) => {
 };
 
 const SEND_USAGE = 'Usage: baton send --to <codex|claude> [--from codex|claude|user] [--project id] <text…>\n';
+const SEND_OPTIONS = new Set(['to', 'from', 'project']);
+
+/**
+ * Only --to, --from and --project are options, anywhere; every other word is message text, so a
+ * message may start with "-" (bullet lists, "-1 failing"). After `--`, everything is text.
+ */
+function parseSendArgs(args: string[]): { options: Record<string, string>; text: string } | null {
+  const options: Record<string, string> = {};
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--') {
+      words.push(...args.slice(i + 1));
+      break;
+    }
+    const option = /^--([a-z]+)(?:=([\s\S]*))?$/.exec(arg);
+    if (!option || !SEND_OPTIONS.has(option[1]!)) {
+      words.push(arg);
+      continue;
+    }
+    const value = option[2] ?? args[++i];
+    if (value === undefined) return null;
+    options[option[1]!] = value;
+  }
+  return { options, text: words.join(' ').trim() };
+}
 
 export const send: Command = async (ctx, io, args) => {
-  const { values, positionals } = parseArgs({
-    args,
-    options: { to: { type: 'string' }, from: { type: 'string' }, project: { type: 'string' } },
-    allowPositionals: true,
-  });
-  const text = positionals.join(' ').trim();
-  const sender = values.from ?? detectAgent(io.env) ?? 'user';
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) {
+    io.out(SEND_USAGE);
+    return 0;
+  }
+  const parsed = parseSendArgs(args);
+  if (!parsed) {
+    io.err(SEND_USAGE);
+    return 2;
+  }
+  const { options, text } = parsed;
+  const detected = detectAgent(io.env);
+  if (!options.from && detected === 'both') {
+    io.err('Both Codex and Claude Code variables are set here (one agent was started from the other), so the sender is unknown: pass --from codex or --from claude.\n');
+    return 2;
+  }
+  const sender = options.from ?? (isAgent(detected) ? detected : 'user');
   if (!isAgent(sender) && sender !== 'user') {
     io.err(`--from must be codex, claude or user.\n${SEND_USAGE}`);
     return 2;
   }
   // From inside an agent, the recipient defaults to the other one.
-  const recipient = values.to ?? (isAgent(sender) ? otherAgent(sender) : undefined);
+  const recipient = options.to ?? (isAgent(sender) ? otherAgent(sender) : undefined);
   if (!isAgent(recipient) || !text) {
     io.err(SEND_USAGE);
     return 2;
@@ -154,7 +189,7 @@ export const send: Command = async (ctx, io, args) => {
     io.err(`The message is ${text.length} characters; the limit is ${MAX_MESSAGE_CHARS}. Keep it short, or point to a file.\n`);
     return 2;
   }
-  const id = values.project ?? ctx.resolve(io.cwd).id;
+  const id = options.project ?? ctx.resolve(io.cwd).id;
   const clean = redact(text);
   ctx.ledger.addRedactions(clean.findings);
   const messageId = ctx.ledger.addMessage(id, { recipient, sender, text: clean.text, createdAt: nowOf(ctx).toISOString() });
@@ -182,7 +217,8 @@ export const inbox: Command = async (ctx, io, args) => {
     io.err('--tool must be codex or claude.\n');
     return 2;
   }
-  const tool = values.tool ?? detectAgent(io.env) ?? undefined;
+  const detected = detectAgent(io.env);
+  const tool = values.tool ?? (isAgent(detected) ? detected : undefined);
   if (values.ack && !tool) {
     io.err('--ack needs --tool codex or --tool claude, so it never marks the other agent\'s messages as read.\n');
     return 2;

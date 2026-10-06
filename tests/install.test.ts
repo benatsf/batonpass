@@ -146,6 +146,23 @@ test('hook status for doctor', () => {
   assert.deepEqual(hookStatus(paths), [[true, 'Claude Code hooks installed (5 of 5)'], [true, 'Codex hooks installed (5 of 5)']]);
 });
 
+test('reinstalling keeps batonpass hooks where they are among the user\'s, since Codex trusts hooks by position', () => {
+  const paths = home();
+  install(paths);
+  const doc = read(paths.codexHooks) as { hooks: Record<string, unknown[]> };
+  doc.hooks.Stop!.push({ hooks: [{ type: 'command', command: 'notify-done' }] });
+  doc.hooks.SessionStart!.unshift({ hooks: [{ type: 'command', command: 'load-env' }] });
+  delete doc.hooks.PostToolUse;
+  writeFileSync(paths.codexHooks, `${JSON.stringify(doc, null, 2)}\n`);
+  install(paths);
+  const after = read(paths.codexHooks) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
+  const commands = (event: string) => after.hooks[event]!.map((g) => g.hooks[0]!.command.replace(`${paths.launcher} `, ''));
+  assert.deepEqual(commands('Stop'), ['hook stop --tool codex', 'notify-done']);
+  assert.deepEqual(commands('SessionStart'), ['load-env', 'hook session-start --tool codex']);
+  assert.deepEqual(commands('PostToolUse'), ['hook post-tool-use --tool codex']);
+  assert.deepEqual(planInstall(paths, both, LAUNCHER, SKILLS, NOW).changes, []);
+});
+
 test('upgrading from 0.1.0 adds the message hooks and skill, keeps the trusted ones, and doctor notices until then', () => {
   const paths = home();
   install(paths);

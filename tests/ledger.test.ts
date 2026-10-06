@@ -176,6 +176,14 @@ test('claims the oldest messages that fit the size budget, at least one', () => 
   assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', now, { maxChars: 10 }).map((m) => m.text[0]), ['c']);
 });
 
+test('the size budget can count each message\'s framing too', () => {
+  const ledger = new Ledger(dbPath());
+  for (const text of ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30)]) ledger.addMessage('p', msg({ text }));
+  const now = '2026-09-26T10:00:00.000Z';
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', now, { maxChars: 100, perMessage: 40 }).map((m) => m.text[0]), ['a']);
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', now, { maxChars: 100 }).map((m) => m.text[0]), ['b', 'c']);
+});
+
 test('concurrent claimers never deliver a message twice', async () => {
   const path = dbPath();
   const ledger = new Ledger(path);
@@ -187,8 +195,10 @@ test('concurrent claimers never deliver a message twice', async () => {
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
     child.on('exit', () => resolve(out.split('\n').filter(Boolean).map(Number)));
   });
-  const claims = (await Promise.all([run(), run(), run(), run()])).flat().sort((a, b) => a - b);
+  const results = await Promise.all([run(), run(), run(), run()]);
+  const claims = results.flat().sort((a, b) => a - b);
   assert.deepEqual(claims, Array.from({ length: 60 }, (_, i) => i + 1));
+  assert.ok(results.filter((ids) => ids.length > 0).length > 1, 'several claimers took part');
 });
 
 test('upgrades a schema 2 ledger in place and keeps its data', () => {

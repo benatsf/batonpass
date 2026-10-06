@@ -8,6 +8,7 @@ All notable changes follow [Semantic Versioning](https://semver.org/).
 - Delivery through new `UserPromptSubmit` and `PostToolUse` hooks and the existing `Stop` hook, for both Codex and Claude Code. Each message is delivered once, framed as data from another agent, never into a subagent, and `Stop` forces at most one continuation per turn.
 - `baton-message` skill for both tools.
 - `baton doctor` compares installed hooks with the ones this version needs, so an upgrade without `baton install` is reported.
+- `baton install` puts its hooks back at the same position among yours on a reinstall; Codex keys hook trust by position.
 - The Codex reader skips Stop-hook continuations (`<hook_prompt>`), which are not user prompts.
 - Ledger schema 3 (new `messages` table, added in place). Earlier versions refuse to open it.
 

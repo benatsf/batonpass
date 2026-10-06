@@ -143,8 +143,13 @@ function parseJson(path: string, text: string | null, fallback: Json): Json {
   }
 }
 
-/** Removes our handlers. Install keeps emptied event keys so the file's key order survives a reinstall. */
-function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolean): void {
+/**
+ * Removes our handlers and returns, per event, the index our first group had, so a reinstall puts
+ * it back in place (Codex keys hook trust by position). Install keeps emptied event keys so the
+ * file's key order survives a reinstall.
+ */
+function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolean): Record<string, number> {
+  const positions: Record<string, number> = {};
   for (const [event, groups] of Object.entries(hooks)) {
     if (!Array.isArray(groups)) continue;
     const kept: Group[] = [];
@@ -154,12 +159,14 @@ function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolea
         kept.push(group);
         continue;
       }
+      positions[event] ??= kept.length;
       const rest = handlers.filter((h) => !commands.has(String(h.command)));
       if (rest.length) kept.push({ ...group, hooks: rest });
     }
     if (kept.length || !dropEmpty) hooks[event] = kept;
     else delete hooks[event];
   }
+  return positions;
 }
 
 function readManifest(path: string): Manifest | null {
@@ -185,8 +192,11 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     const fallback: Json = tool === 'codex' ? { description: CODEX_DESCRIPTION, hooks: {} } : {};
     const doc = parseJson(path, before, fallback);
     const hooks = (typeof doc.hooks === 'object' && doc.hooks !== null ? doc.hooks : {}) as HookMap;
-    removeCommands(hooks, stale, false);
-    for (const { event, group } of entries(tool, command)) (hooks[event] ??= []).push(group);
+    const positions = removeCommands(hooks, stale, false);
+    for (const { event, group } of entries(tool, command)) {
+      const groups = (hooks[event] ??= []);
+      groups.splice(positions[event] ?? groups.length, 0, group);
+    }
     doc.hooks = hooks;
     const after = serialize(doc);
     if (before === null) created.add(path);

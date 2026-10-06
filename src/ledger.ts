@@ -343,19 +343,26 @@ export class Ledger {
 
   /**
    * Marks pending messages as delivered and returns them, oldest first: those sent since `since`,
-   * as many as fit in `maxChars` (always at least one). One UPDATE statement, so concurrent
-   * callers never receive the same message.
+   * as many as fit in `maxChars` counting `perMessage` extra characters each (always at least one).
+   * One UPDATE statement, so concurrent callers never receive the same message.
    */
-  claimMessages(projectId: string, recipient: string, via: string, now: string, options: { since?: string; maxChars?: number } = {}): MessageRow[] {
+  claimMessages(
+    projectId: string,
+    recipient: string,
+    via: string,
+    now: string,
+    options: { since?: string; maxChars?: number; perMessage?: number } = {},
+  ): MessageRow[] {
+    const max = options.maxChars ?? -1;
     const rows = this.db
       .prepare(`UPDATE messages SET delivered_at = ?, delivered_via = ?
         WHERE delivered_at IS NULL AND id IN (
           SELECT id FROM (
-            SELECT id, row_number() OVER (ORDER BY id) AS n, sum(length(text)) OVER (ORDER BY id) AS total FROM messages
+            SELECT id, row_number() OVER (ORDER BY id) AS n, sum(length(text) + ?) OVER (ORDER BY id) AS total FROM messages
             WHERE project_id = ? AND recipient = ? AND delivered_at IS NULL AND created_at >= ?)
           WHERE n = 1 OR ? < 0 OR total <= ?)
         RETURNING *`)
-      .all(now, via, projectId, recipient, options.since ?? '', options.maxChars ?? -1, options.maxChars ?? -1) as Row[];
+      .all(now, via, options.perMessage ?? 0, projectId, recipient, options.since ?? '', max, max) as Row[];
     return rows.map(toMessage).sort((a, b) => a.id - b.id);
   }
 

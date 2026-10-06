@@ -7,18 +7,21 @@ export type Agent = 'codex' | 'claude';
 export const MAX_MESSAGE_CHARS = 2000;
 /** Per hook output, well under Claude Code's 10,000-character cap on injected context. */
 export const DELIVERY_MAX_CHARS = 6000;
+/** Upper bound of the header `renderMessages` adds to each message. */
+export const MESSAGE_FRAME_CHARS = 150;
 
 export const isAgent = (value: unknown): value is Agent => value === 'codex' || value === 'claude';
 export const otherAgent = (agent: Agent): Agent => (agent === 'codex' ? 'claude' : 'codex');
 
 /**
  * The agent whose shell runs this process, from variables each tool sets for the commands it runs.
- * Codex is checked first: `codex exec` started from a Claude Code shell inherits CLAUDECODE.
+ * 'both' when one agent was started from the other's shell and inherited its variables: then the
+ * variables cannot tell which of the two runs this command.
  */
-export function detectAgent(env: NodeJS.ProcessEnv): Agent | null {
-  if (env.CODEX_THREAD_ID || env.CODEX_CI === '1') return 'codex';
-  if (env.CLAUDECODE === '1') return 'claude';
-  return null;
+export function detectAgent(env: NodeJS.ProcessEnv): Agent | 'both' | null {
+  const codex = Boolean(env.CODEX_THREAD_ID) || env.CODEX_CI === '1';
+  const claude = env.CLAUDECODE === '1';
+  return codex && claude ? 'both' : codex ? 'codex' : claude ? 'claude' : null;
 }
 
 function senderLabel(sender: string): string {

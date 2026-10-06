@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureIO, main, type CliIO } from '../src/cli.ts';
 import { createContext, type Context } from '../src/context.ts';
@@ -48,8 +48,8 @@ test('detects the agent whose shell runs batonpass', () => {
   assert.equal(detectAgent({ CLAUDECODE: '1' }), 'claude');
   assert.equal(detectAgent({ CODEX_THREAD_ID: '01a1106a-65ae-7443-b957-e000782c5372' }), 'codex');
   assert.equal(detectAgent({ CODEX_CI: '1' }), 'codex');
-  // Codex run from a Claude Code shell (`codex exec`) inherits CLAUDECODE: the innermost agent is Codex.
-  assert.equal(detectAgent({ CLAUDECODE: '1', CODEX_THREAD_ID: 'x' }), 'codex');
+  // One agent started from the other's shell inherits its variables: which one runs this is unknown.
+  assert.equal(detectAgent({ CLAUDECODE: '1', CODEX_THREAD_ID: 'x' }), 'both');
   assert.equal(detectAgent({}), null);
 });
 
@@ -121,6 +121,28 @@ test('inside an agent, send defaults to the other agent and inbox to this one', 
   assert.match(t.out(), /from the user to Claude Code · read now\nFrom the user\./);
   assert.ok(!t.out().includes('Done with the refactor.'), 'the message for Codex is not acked by Claude Code');
   assert.equal(t.stored().find((m) => m.recipient === 'codex')!.deliveredAt, null);
+});
+
+test('send takes text that looks like options, and options anywhere', async () => {
+  const t = cli();
+  assert.equal(await t.run(['send', '--to', 'codex', '- item one\n- item two']), 0);
+  assert.equal(await t.run(['send', '-1 test failing,', 'see', 'CI', '--to', 'codex']), 0);
+  assert.equal(await t.run(['send', '--to=codex', 'use', '--force', 'only', 'on', 'the', 'branch']), 0);
+  assert.equal(await t.run(['send', '--to', 'codex', '--', '--to', 'is', 'a', 'flag']), 0);
+  assert.deepEqual(t.stored().map((m) => m.text), ['- item one\n- item two', '-1 test failing, see CI', 'use --force only on the branch', '--to is a flag']);
+  assert.equal(await t.run(['send', 'hi', '--to']), 2);
+  t.reset();
+  assert.equal(await t.run(['send', '--help']), 0);
+  assert.match(t.out(), /^Usage: baton send/);
+  assert.equal(t.stored().length, 4);
+});
+
+test('when one agent runs inside the other, send asks who is sending', async () => {
+  const t = cli({ CLAUDECODE: '1', CODEX_THREAD_ID: '01a1106a-65ae-7443-b957-e000782c5372' });
+  assert.equal(await t.run(['send', 'Done.']), 2);
+  assert.match(t.err(), /pass --from codex or --from claude/);
+  assert.equal(await t.run(['send', '--from', 'codex', 'Done.']), 0);
+  assert.deepEqual(t.stored().map((m) => [m.sender, m.recipient]), [['codex', 'claude']]);
 });
 
 test('send and inbox reject bad input without storing anything', async () => {
@@ -251,6 +273,47 @@ test('BATON_HOOK disables delivery; BATON_SKIP_INJECT only skips the brief', asy
   const resumed = hooks({ BATON_SKIP_INJECT: '1' });
   resumed.sendTo('claude', 'hello');
   assert.ok(contextOf(await runHook('UserPromptSubmit', 'claude', resumed.input(), resumed.make), 'UserPromptSubmit').includes('hello'));
+});
+
+test('a failure after claiming leaves the message pending', async () => {
+  const h = hooks();
+  writeFileSync(join(h.env.home, 'config.toml'), '[render]\ntimeZone = "Europe/Pari"\n');
+  h.sendTo('claude', 'Still here.');
+  assert.equal(await runHook('UserPromptSubmit', 'claude', h.input(), h.make), '');
+  assert.deepEqual(h.pending(), ['Still here.']);
+  assert.match(readFileSync(join(h.env.home, 'logs', 'baton.log'), 'utf8'), /hook-error .*"error":"RangeError"/);
+});
+
+test('a log that cannot be written does not cost a delivered message', async () => {
+  const h = hooks({}, { log: () => { throw new Error('ENOSPC'); } });
+  h.sendTo('claude', 'Delivered anyway.');
+  assert.ok(contextOf(await runHook('UserPromptSubmit', 'claude', h.input(), h.make), 'UserPromptSubmit').includes('Delivered anyway.'));
+  assert.deepEqual(h.pending(), []);
+});
+
+test('one delivery stays well under Claude Code\'s 10,000-character context cap; the rest waits', async () => {
+  const h = hooks();
+  for (let i = 0; i < 60; i++) h.sendTo('claude', `${String(i).padStart(2, '0')} ${'x'.repeat(97)}`, { sender: 'user' });
+  const first = contextOf(await runHook('PostToolUse', 'claude', h.input(), h.make), 'PostToolUse');
+  assert.ok(first.length <= 7000, `${first.length} characters`);
+  const left = h.pending().length;
+  assert.ok(left > 0 && left < 60);
+  const second = contextOf(await runHook('PostToolUse', 'claude', h.input(), h.make), 'PostToolUse');
+  assert.ok(second.length <= 7000);
+  assert.ok(h.pending().length < left);
+});
+
+test('baton hook prints the exact output line for each tool and event', async () => {
+  const t = cli();
+  const stdin = async () => JSON.stringify({ session_id: 's1', cwd: t.env.repo });
+  for (const [tool, event, name] of [['claude', 'user-prompt-submit', 'UserPromptSubmit'], ['claude', 'post-tool-use', 'PostToolUse'], ['codex', 'user-prompt-submit', 'UserPromptSubmit'], ['codex', 'post-tool-use', 'PostToolUse']] as const) {
+    await t.run(['send', '--to', tool, '--from', 'user', `for ${tool} at ${event}`]);
+    t.reset();
+    assert.equal(await t.run(['hook', event, '--tool', tool], { readStdin: stdin }), 0);
+    assert.equal(t.out().split('\n').length, 2, 'one JSON line');
+    assert.ok(contextOf(t.out(), name).includes(`for ${tool} at ${event}`));
+    t.reset();
+  }
 });
 
 test('with nothing pending, per-turn hooks return before resolving the project', async () => {

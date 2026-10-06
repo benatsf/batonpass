@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import { staleSeconds, type Context } from './context.ts';
 import { ingest } from './ingest.ts';
-import { DELIVERY_MAX_CHARS, renderMessages } from './messages.ts';
+import { DELIVERY_MAX_CHARS, MESSAGE_FRAME_CHARS, renderMessages } from './messages.ts';
 import { withStaleWarning } from './render.ts';
 import { refresh } from './snapshot.ts';
 
@@ -61,18 +61,34 @@ function sessionStart(ctx: Context, input: HookInput): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: brief } });
 }
 
+/** Hooks time out after 5 s: give up on a busy ledger well before, and deliver at the next boundary. */
+const CLAIM_BUSY_TIMEOUT_MS = 1500;
+
 /** Claims this tool's pending messages for the project and frames them; each message is claimed once. */
 function takeMessages(ctx: Context, tool: HookTool, event: HookEvent, input: HookInput): string | null {
   if (!input.cwd) return null;
   const now = (ctx.now ?? (() => new Date()))();
   const since = new Date(now.getTime() - ctx.config.messages.maxAgeHours * 3_600_000).toISOString();
-  // Most hook runs find nothing: answer that from one indexed query, before running git.
+  // Most hook runs find nothing for this tool: answer that from one indexed query, before running git.
   if (!ctx.ledger.hasPendingMessages(tool, since)) return null;
   const project = ctx.resolve(input.cwd);
-  const messages = ctx.ledger.claimMessages(project.id, tool, `${tool}:${event}`, now.toISOString(), { since, maxChars: DELIVERY_MAX_CHARS });
-  if (!messages.length) return null;
-  ctx.log('deliver', { tool, event, messages: messages.length });
-  return renderMessages(messages, tool, ctx.config.render.timeZone);
+  ctx.ledger.db.exec(`PRAGMA busy_timeout = ${CLAIM_BUSY_TIMEOUT_MS}`);
+  // Claim and render in one transaction: if rendering fails, the claim rolls back and the message stays pending.
+  const delivered = ctx.ledger.transaction(() => {
+    const messages = ctx.ledger.claimMessages(project.id, tool, `${tool}:${event}`, now.toISOString(), {
+      since,
+      maxChars: DELIVERY_MAX_CHARS,
+      perMessage: MESSAGE_FRAME_CHARS,
+    });
+    return messages.length ? { count: messages.length, text: renderMessages(messages, tool, ctx.config.render.timeZone) } : null;
+  });
+  if (!delivered) return null;
+  try {
+    ctx.log('deliver', { tool, event, messages: delivered.count });
+  } catch {
+    // The messages are claimed: they must reach the output even if the log cannot be written.
+  }
+  return delivered.text;
 }
 
 const STOP_NOTE = 'This arrived as you were finishing your turn. Take it into account if it bears on what the user asked, then finish.';
