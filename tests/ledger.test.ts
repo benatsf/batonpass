@@ -133,3 +133,83 @@ test('refuses a ledger written by a newer batonpass', () => {
   old.close();
   assert.throws(() => new Ledger(path), /newer batonpass/);
 });
+
+const msg = (over: Partial<{ recipient: string; sender: string; text: string; createdAt: string }> = {}) => ({
+  recipient: 'claude', sender: 'codex', text: 'Schema migration is merged.', createdAt: '2026-09-26T10:00:00.000Z', ...over,
+});
+
+test('stores messages per project and recipient, and claims each one exactly once', () => {
+  const ledger = new Ledger(dbPath());
+  const first = ledger.addMessage('p', msg());
+  const second = ledger.addMessage('p', msg({ text: 'Tests are green.', createdAt: '2026-09-26T10:01:00.000Z' }));
+  ledger.addMessage('p', msg({ recipient: 'codex', sender: 'claude' }));
+  ledger.addMessage('q', msg({ text: 'other project' }));
+  assert.ok(second > first);
+  assert.equal(ledger.hasPendingMessages('claude', ''), true);
+  const claimed = ledger.claimMessages('p', 'claude', 'claude:post-tool-use', '2026-09-26T10:05:00.000Z');
+  assert.deepEqual(claimed.map((m) => m.text), ['Schema migration is merged.', 'Tests are green.']);
+  assert.deepEqual(claimed[0], {
+    id: first, projectId: 'p', recipient: 'claude', sender: 'codex', createdAt: '2026-09-26T10:00:00.000Z', text: 'Schema migration is merged.',
+    deliveredAt: '2026-09-26T10:05:00.000Z', deliveredVia: 'claude:post-tool-use',
+  });
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'again', '2026-09-26T10:06:00.000Z'), []);
+  assert.deepEqual(ledger.messages('p', { recipient: 'claude', pendingOnly: true }), []);
+  assert.deepEqual(ledger.messages('p', { recipient: 'codex', pendingOnly: true }).map((m) => m.sender), ['claude']);
+  assert.deepEqual(ledger.messages('q', { pendingOnly: true }).map((m) => m.text), ['other project']);
+  assert.equal(ledger.messages('p').length, 3);
+});
+
+test('claims only messages sent since the cutoff; older ones stay pending', () => {
+  const ledger = new Ledger(dbPath());
+  ledger.addMessage('p', msg({ text: 'stale', createdAt: '2026-09-20T10:00:00.000Z' }));
+  ledger.addMessage('p', msg({ text: 'fresh', createdAt: '2026-09-26T09:00:00.000Z' }));
+  assert.equal(ledger.hasPendingMessages('claude', '2026-09-27T00:00:00.000Z'), false);
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', '2026-09-26T10:00:00.000Z', { since: '2026-09-25T10:00:00.000Z' }).map((m) => m.text), ['fresh']);
+  assert.deepEqual(ledger.messages('p', { pendingOnly: true }).map((m) => m.text), ['stale']);
+});
+
+test('claims the oldest messages that fit the size budget, at least one', () => {
+  const ledger = new Ledger(dbPath());
+  for (const text of ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30)]) ledger.addMessage('p', msg({ text }));
+  const now = '2026-09-26T10:00:00.000Z';
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', now, { maxChars: 65 }).map((m) => m.text[0]), ['a', 'b']);
+  assert.deepEqual(ledger.claimMessages('p', 'claude', 'hook', now, { maxChars: 10 }).map((m) => m.text[0]), ['c']);
+});
+
+test('concurrent claimers never deliver a message twice', async () => {
+  const path = dbPath();
+  const ledger = new Ledger(path);
+  for (let i = 0; i < 60; i++) ledger.addMessage('p', msg({ text: `m${i}` }));
+  ledger.close();
+  const run = () => new Promise<number[]>((resolve) => {
+    const child = spawn(process.execPath, [join(import.meta.dirname, 'support', 'claim-messages.ts'), path, '30'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
+    child.on('exit', () => resolve(out.split('\n').filter(Boolean).map(Number)));
+  });
+  const claims = (await Promise.all([run(), run(), run(), run()])).flat().sort((a, b) => a - b);
+  assert.deepEqual(claims, Array.from({ length: 60 }, (_, i) => i + 1));
+});
+
+test('upgrades a schema 2 ledger in place and keeps its data', () => {
+  const path = dbPath();
+  const old = new Ledger(path);
+  old.addNote('p', 'keep me', '2026-09-26T10:00:00Z');
+  old.db.exec('DROP TABLE messages; PRAGMA user_version = 2');
+  old.close();
+  const ledger = new Ledger(path);
+  assert.equal(ledger.notes('p')[0]!.text, 'keep me');
+  ledger.addMessage('p', msg());
+  assert.equal(ledger.messages('p').length, 1);
+});
+
+test('prunes old messages and re-redacts message text', () => {
+  const ledger = new Ledger(dbPath());
+  const leaked = 'hunter2' + 'hunter2';
+  ledger.addMessage('p', msg({ text: 'old', createdAt: '2026-01-01T00:00:00.000Z' }));
+  ledger.addMessage('p', msg({ text: `use ${leaked}` }));
+  ledger.prune(new Date('2026-09-26T12:00:00Z'), 90, 50);
+  assert.deepEqual(ledger.messages('p').map((m) => m.text), [`use ${leaked}`]);
+  ledger.reRedact(99, (text) => text.replaceAll(leaked, '[REDACTED:assignment]'));
+  assert.equal(ledger.messages('p')[0]!.text, 'use [REDACTED:assignment]');
+});

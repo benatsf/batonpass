@@ -14,6 +14,8 @@ const WRAPPED_PREFIXES = [
   '<codex_internal_context',
   '<turn_aborted',
   '<baton-context',
+  // A Stop hook's block reason, fed back to the model as a user message.
+  '<hook_prompt',
 ];
 const REQUEST_MARKER = /## My request(?: for Codex)?:\s*/;
 const HEAD_LINE_BYTES = 4 * 1024 * 1024;

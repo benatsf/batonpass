@@ -72,6 +72,14 @@ test('ignores injected baton context and malformed lines', () => {
   assert.throws(() => reader.parse('{not json', state));
 });
 
+test('a Stop hook continuation is not a user prompt', () => {
+  const reader = createCodexReader('/nonexistent');
+  const state = { sessionId: ID, cwd: '/work/web' };
+  const text = '<hook_prompt hook_run_id="stop:0:/home/me/.codex/hooks.json">&lt;baton-messages to=&quot;codex&quot;&gt;…</hook_prompt>';
+  const line = JSON.stringify({ timestamp: '2026-09-26T12:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+  assert.deepEqual(reader.parse(line, state), []);
+});
+
 test('reports a working-directory change', () => {
   const reader = createCodexReader('/nonexistent');
   const state = { sessionId: ID, cwd: '/work/web' };

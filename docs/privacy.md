@@ -12,9 +12,10 @@ In `~/.baton/baton.db` (SQLite, file mode `0600`, directory `0700`):
 - tool call names with abbreviated inputs (at most 300 characters), after redaction;
 - goals, session titles, pull request links, compaction markers, token usage and cost figures;
 - your `baton note` entries, after redaction;
+- messages sent with `baton send`, after redaction, with sender, recipient and delivery time;
 - rendered snapshots and cached Jev scores.
 
-Tool outputs (command output, file contents, web pages) are never stored as such. Claude Code's compaction summaries are stored after redaction; the model writes them from the whole context, so they can paraphrase tool output. Events older than 90 days and all but the latest 50 snapshots per project are pruned.
+Tool outputs (command output, file contents, web pages) are never stored as such. Claude Code's compaction summaries are stored after redaction; the model writes them from the whole context, so they can paraphrase tool output. Events and messages older than 90 days and all but the latest 50 snapshots per project are pruned.
 
 ## Redaction
 

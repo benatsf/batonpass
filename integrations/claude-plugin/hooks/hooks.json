@@ -1,9 +1,11 @@
 {
-  "description": "batonpass: inject the latest project context at session start and record every turn",
+  "description": "batonpass: inject the latest project context at session start, record every turn, and deliver messages from the other agent",
   "hooks": {
     "SessionStart": [
       { "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "baton hook session-start --tool claude", "timeout": 5 }] }
     ],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "baton hook user-prompt-submit --tool claude", "timeout": 5 }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "baton hook post-tool-use --tool claude", "timeout": 5 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "baton hook stop --tool claude", "timeout": 30 }] }],
     "PreCompact": [{ "hooks": [{ "type": "command", "command": "baton hook pre-compact --tool claude", "timeout": 10 }] }]
   }

@@ -25,6 +25,8 @@ export interface BatonConfig {
     rules: boolean;
     apiKeyEnv: string;
   };
+  /** Undelivered messages older than this are no longer injected by hooks (`baton inbox` still lists them). */
+  messages: { maxAgeHours: number };
   aliases: Record<string, string>;
   sources: { codexHome: string; claudeProjects: string };
   eval: { answerCommand: string[] };
@@ -65,6 +67,7 @@ export function defaultConfig(home: string, env: NodeJS.ProcessEnv): BatonConfig
       rules: false,
       apiKeyEnv: 'TYPESAFE_API_KEY',
     },
+    messages: { maxAgeHours: 24 },
     aliases: {},
     sources: {
       codexHome: env.CODEX_HOME ? expandHome(env.CODEX_HOME, env) : join(userHome(env), '.codex'),
