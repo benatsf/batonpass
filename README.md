@@ -71,7 +71,7 @@ The recipient sees the message at its next hook boundary:
 
 Limits:
 
-- Hooks run only while an agent is working. A message to an idle session waits for your next prompt there; nothing can wake it.
+- Hooks run only while an agent is working. A message to an idle session waits for your next prompt there; nothing wakes it yet. [docs/waking-idle-agents.md](docs/waking-idle-agents.md) records what was tested and the plan.
 - With two sessions of the same tool open on one project, whichever reaches a hook boundary first gets the message.
 - Codex runs the new `UserPromptSubmit` and `PostToolUse` hooks only after you trust them in `/hooks`. Until then, the `Stop` hook you already trusted still delivers at the end of each turn.
 - Codex shows a `Stop` reason to the model XML-escaped inside `<hook_prompt>`; the model still reads it.
