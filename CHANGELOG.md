@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- `baton inbox` run inside Codex or Claude Code prints messages in the same `<baton-messages>` data framing as the hooks, so message text reaches the agent as relayed data rather than bare text. In your own terminal it is still a plain list.
+
 ## 0.2.1
 
 - `baton install` no longer reports "inline [hooks]" in Codex's config.toml when that file only holds Codex's own hook trust records (`[hooks.state."…"]`).
