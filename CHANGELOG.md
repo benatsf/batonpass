@@ -2,7 +2,7 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.1
 
 - `baton install` no longer reports "inline [hooks]" in Codex's config.toml when that file only holds Codex's own hook trust records (`[hooks.state."…"]`).
 
