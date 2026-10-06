@@ -88,6 +88,46 @@ test('reports a working-directory change', () => {
   assert.equal(state.cwd, '/work/web/apps/api');
 });
 
+/** One user-role message; `kinds` becomes Codex's per-item content_item_kinds annotation. */
+function userItem(content: unknown[], kinds?: string[]): string {
+  const meta = kinds ? { internal_chat_message_metadata_passthrough: { turn_id: 'turn-1', content_item_kinds: kinds } } : {};
+  return JSON.stringify({ timestamp: '2026-09-26T12:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content, ...meta } });
+}
+const text = (value: string) => ({ type: 'input_text', text: value });
+const heartbeat = '<heartbeat>\n  <automation_id>nightly-triage</automation_id>\n  <current_time_iso>2026-09-26T12:00:00Z</current_time_iso>\n  <instructions>\nCheck the build.\n  </instructions>\n</heartbeat>\n';
+const openPage = '<external_codex_apps_open_page>\nTitle: Pricing\nURL: https://example.test/pricing\n</external_codex_apps_open_page>';
+
+test('ignores heartbeats and app pages Codex injects as user messages', () => {
+  const reader = createCodexReader('/nonexistent');
+  const cases: Array<[string, string]> = [
+    ['heartbeat, unlabelled (older builds)', userItem([text(heartbeat)])],
+    ['heartbeat labelled user.text (older builds)', userItem([text(heartbeat)], ['user.text'])],
+    ['heartbeat labelled user.heartbeat', userItem([text(heartbeat)], ['user.heartbeat'])],
+    ['open app page', userItem([text(openPage)], ['additional_content.codex_apps_open_page'])],
+    ['open app page, unlabelled', userItem([text(openPage)])],
+    ['an unfamiliar harness kind', userItem([text('<future_context>\nnothing typed\n</future_context>')], ['future.context'])],
+  ];
+  for (const [name, line] of cases) assert.deepEqual(reader.parse(line, { sessionId: ID, cwd: '/work/web' }), [], name);
+});
+
+test('keeps prompts whose content kinds include user input or are uncertain', () => {
+  const reader = createCodexReader('/nonexistent');
+  const image = { type: 'input_image', image_url: 'data:image/png;base64,AAAA' };
+  const cases: Array<[string, string, string]> = [
+    ['typed text', userItem([text('Fix the flaky test.')], ['user.text']), 'Fix the flaky test.'],
+    ['text with an image', userItem([text('Match this mockup.'), image], ['user.text', 'user.image']), 'Match this mockup.'],
+    ['image only', userItem([image], ['user.image']), '[image]'],
+    ['text with audio', userItem([text('Summarise the call.'), { type: 'input_audio' }], ['user.text', 'user.audio']), 'Summarise the call.'],
+    ['kind unknown', userItem([text('Rename the module.')], ['unknown']), 'Rename the module.'],
+    ['image replaced by preparation', userItem([text('Why is this red?'), text('[image omitted]')], ['user.text', 'images.unsupported']), 'Why is this red?\n[image omitted]'],
+    ['kinds missing an entry', userItem([text('Ship it.'), text('Then tag it.')], ['goal.internal_context']), 'Ship it.\nThen tag it.'],
+    ['empty kinds', userItem([text('Bump the version.')], []), 'Bump the version.'],
+  ];
+  for (const [name, line, expected] of cases) {
+    assert.deepEqual(reader.parse(line, { sessionId: ID, cwd: '/work/web' }).map((e) => [e.kind, e.text]), [['user', expected]], name);
+  }
+});
+
 test('an image-only prompt still starts a turn', () => {
   const reader = createCodexReader('/nonexistent');
   const state = { sessionId: ID, cwd: '/work/web' };

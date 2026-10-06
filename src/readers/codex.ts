@@ -13,10 +13,19 @@ const WRAPPED_PREFIXES = [
   '<recommended_plugins',
   '<codex_internal_context',
   '<turn_aborted',
+  '<heartbeat',
+  '<external_codex_apps_open_page',
   '<baton-context',
   // A Stop hook's block reason, fed back to the model as a user message.
   '<hook_prompt',
 ];
+/**
+ * Kinds that may stand for something the user typed. Codex labels each content item of a message
+ * (`user.text`, `goal.internal_context`, …) and, like Codex itself, keeps uncertain labels as input.
+ */
+const UNCERTAIN_KINDS = new Set(['', 'unknown', 'images.preparation_error', 'images.unsupported', 'audio.unsupported']);
+const isInputKind = (kind: unknown) =>
+  typeof kind !== 'string' || UNCERTAIN_KINDS.has(kind) || (kind.startsWith('user.') && kind !== 'user.heartbeat');
 const REQUEST_MARKER = /## My request(?: for Codex)?:\s*/;
 const HEAD_LINE_BYTES = 4 * 1024 * 1024;
 
@@ -39,6 +48,14 @@ function unwrapUserText(raw: string): string | null {
   const marker = REQUEST_MARKER.exec(text);
   const request = marker ? text.slice(marker.index + marker[0].length).trim() : text;
   return request || null;
+}
+
+/** True when every content item is labelled as harness context; unlabelled or partly labelled items stay prompts. */
+function injectedByHarness(p: Json): boolean {
+  const meta = p.internal_chat_message_metadata_passthrough;
+  const kinds = isObject(meta) ? meta.content_item_kinds : undefined;
+  if (!Array.isArray(kinds) || kinds.length === 0) return false;
+  return Array.isArray(p.content) && kinds.length === p.content.length && !kinds.some(isInputKind);
 }
 
 function contentText(content: unknown, type: string): string {
@@ -104,6 +121,7 @@ export function createCodexReader(codexHome: string): SourceReader {
         }
         case 'response_item': {
           if (p.type === 'message' && p.role === 'user') {
+            if (injectedByHarness(p)) return [];
             const raw = contentText(p.content, 'input_text');
             const text = unwrapUserText(raw);
             if (text) return event('user', text);
