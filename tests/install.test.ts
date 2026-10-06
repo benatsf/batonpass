@@ -139,6 +139,19 @@ test('notes explain Codex hook trust and inline hooks', () => {
   assert.match(notes, /docs\/privacy\.md/);
 });
 
+test('inline hooks are reported in either TOML form, but not Codex\'s own trust records', () => {
+  const inline = (config: string) => {
+    const paths = home();
+    write(paths.codexConfig, config);
+    return planInstall(paths, both, LAUNCHER, SKILLS, NOW).notes.some((n) => n.includes('inline [hooks]'));
+  };
+  const trust = '[hooks.state."/home/me/.codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:00"\n';
+  assert.equal(inline(`model = "gpt-6-sol"\n\n${trust}`), false);
+  assert.equal(inline('[hooks]\nStop = [{ hooks = [{ type = "command", command = "notify-done" }] }]\n'), true);
+  assert.equal(inline(`${trust}\n[[hooks.PostToolUse]]\nmatcher = "*"\n`), true);
+  assert.equal(inline('model = '), false, 'a config Codex cannot parse either gets no note');
+});
+
 test('hook status for doctor', () => {
   const paths = home();
   assert.deepEqual(hookStatus(paths), [[null, 'Hooks not installed: run `baton install`']]);

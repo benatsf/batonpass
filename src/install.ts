@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseToml } from 'smol-toml';
 import type { Check } from './commands.ts';
 
 export interface InstallPaths {
@@ -169,6 +170,20 @@ function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolea
   return positions;
 }
 
+/**
+ * Whether config.toml defines hooks itself: an event (`[[hooks.Stop]]`, `Stop = [...]`) holds a list
+ * of groups. Codex also keeps its trust records there (`[hooks.state."<key>"]`), which are not hooks.
+ */
+function hasInlineHooks(configText: string): boolean {
+  try {
+    const hooks = parseToml(configText).hooks;
+    return typeof hooks === 'object' && hooks !== null && Object.values(hooks).some(Array.isArray);
+  } catch {
+    // Codex cannot read an unparsable config either, so it has no hooks to merge.
+    return false;
+  }
+}
+
 function readManifest(path: string): Manifest | null {
   const text = readText(path);
   return text ? (JSON.parse(text) as Manifest) : null;
@@ -218,8 +233,7 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
   ];
   if (target.codex) {
     notes.push('Codex runs a new hook only after you trust it: open Codex, run /hooks, and trust the batonpass hooks (message delivery at prompts and tool calls needs the UserPromptSubmit and PostToolUse ones).');
-    const config = readText(paths.codexConfig) ?? '';
-    if (/^\s*\[\[?hooks[.\]]/m.test(config)) notes.push('Your Codex config.toml also has inline [hooks]; Codex merges both and warns at startup.');
+    if (hasInlineHooks(readText(paths.codexConfig) ?? '')) notes.push('Your Codex config.toml also has inline [hooks]; Codex merges both and warns at startup.');
   }
   const manifest: Manifest = {
     version: 1,
