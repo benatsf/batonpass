@@ -10,7 +10,7 @@ import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATE
 import { normalizeEvent, runHook } from './hooks.ts';
 import { applyPlan, defaultLauncher, installPaths, planInstall, planUninstall, readSkills, renderDiff } from './install.ts';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 export interface CliIO {
   out(text: string): void;
