@@ -1,6 +1,6 @@
 {
   "name": "batonpass",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Automatic, local, verbatim session handoff between Codex and Claude Code.",
   "author": { "name": "batonpass contributors" },
   "license": "MIT"
