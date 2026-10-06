@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- `baton install` no longer reports "inline [hooks]" in Codex's config.toml when that file only holds Codex's own hook trust records (`[hooks.state."…"]`).
+
 ## 0.2.0
 
 - Messages between agents: `baton send` queues a short message for the other agent (or from you) in the same project; `baton inbox` lists them and `--ack` marks them read.
