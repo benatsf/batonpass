@@ -29,4 +29,26 @@ Claude Code has no equivalent for an idle interactive session, so waking would w
 3. Messages carry a persisted chain id that replies inherit: at most one wake per chain, claimed atomically, with a cooldown and an hourly budget that survive restarts. An ambiguous queue result is never retried; on any doubt the message waits for normal hook delivery.
 4. Immediately before queueing, check that the opt-in is still valid, the session exists, and a reliable signal shows it open and idle.
 
-Step 4 is the open problem: no such signal has been found yet (`codex agents`, which lists sessions on the local app-server daemon, is a candidate, unverified). Nothing past step 1 should ship until it is solved and the cases above pass as tests.
+Step 4 is the open problem; see below. Nothing past step 1 should ship until it is solved and the cases above pass as tests.
+
+## Detecting an open session
+
+Tested on 2026-10-06 with Codex CLI 0.160.0.
+
+Codex sessions started in a terminal run on a shared local app-server daemon. Its control socket (`~/.codex/app-server-control/app-server-control.sock`: WebSocket over a Unix socket, no authentication; the path `/daemon/shutdown` stops the daemon) answers `thread/read` with a status of `notLoaded`, `idle`, `active` or `systemError`. On a disposable terminal session:
+
+| Moment | Status |
+| --- | --- |
+| Open, waiting for input | `idle` |
+| Running a turn | `active` |
+| Window closed, within about 60 s | `idle` (still loaded) |
+| Window closed, later | `notLoaded` |
+
+- The daemon unloads a thread `thread_unload_delay_secs` (default 60) after its last client disconnects. Until then a closed session looks exactly like an open, idle one, and a queued message runs as a turn with nobody watching. This was observed, in a session with full-access permissions.
+- The daemon tracks connected clients per thread internally, but 0.160.0 does not expose that. `canAcceptDirectInput` is `true` with no client attached.
+- `SessionEnd` hooks run when the thread shuts down, which on the daemon means when it unloads, not when the window closes. They add nothing.
+- Codex Desktop sessions run inside the ChatGPT app's own app-server, over a private stdio pipe. They never appear on the daemon, so batonpass can neither see nor wake them that way.
+
+A check is still possible for terminal sessions. An open session keeps its client and stays loaded; a closed one unloads within the delay. So two probes at least the delay plus a margin apart, both `idle`, with the thread's `updatedAt` unchanged, mean a client is almost certainly attached. A race remains: the window can close between the last probe and the queue, and the turn then runs with nobody watching.
+
+**Recommendation: do not build wake on this yet.** It cannot reach Codex Desktop sessions at all. The remaining race runs a full-permission turn unattended. And the check relies on an experimental, undocumented protocol. What would make it reliable is Codex exposing attached clients in `thread/read` (or a status such as "idle, client attached"). Revisit when it does.
