@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { JevClient } from 'fast-jev-compaction';
 import type { CliIO } from './cli.ts';
 import { staleSeconds, type Context } from './context.ts';
+import { desktopChecks } from './desktop-command.ts';
 import { ingest } from './ingest.ts';
 import { hookStatus, installPaths } from './install.ts';
 import type { MessageRow } from './ledger.ts';
@@ -313,6 +314,7 @@ export function doctorChecks(ctx: Context): Check[] {
   checks.push([null, `Secrets redacted so far: ${redactions || 'none'}`]);
   checks.push(logProblems(ctx.config.home));
   checks.push(...hookStatus(installPaths(ctx.env, ctx.config.home)));
+  checks.push(...desktopChecks(ctx.env, ctx.config.home, ctx.config.sources.claudeProjects));
   if (ctx.config.select.strategy === 'jev-select') {
     const hasKey = Boolean(ctx.env[ctx.config.jev.apiKeyEnv]);
     checks.push([hasKey, `Jev: on, key in ${ctx.config.jev.apiKeyEnv} ${hasKey ? 'present' : 'missing'}`]);

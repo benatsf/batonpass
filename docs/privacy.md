@@ -4,6 +4,8 @@
 
 Transcript files of Codex (`~/.codex/sessions/**/rollout-*.jsonl`, `~/.codex/session_index.jsonl`) and Claude Code (`~/.claude/projects/*/*.jsonl`). They are opened read-only and never modified, moved or deleted.
 
+With `baton desktop enable` (macOS, off by default), batonpass also reads and writes Claude desktop's Code-tab session records in `~/Library/Application Support/Claude/claude-code-sessions/` and reads `~/Library/Logs/Claude/main.log*` to tell which account is loaded. It copies records between account folders on this Mac, keeps a backup and quarantined copies in `~/.baton/desktop-sync/`, sends nothing anywhere, and never opens transcripts for writing. See [claude-desktop-sync.md](claude-desktop-sync.md).
+
 ## What is stored
 
 In `~/.baton/baton.db` (SQLite, file mode `0600`, directory `0700`):
@@ -31,4 +33,4 @@ There is no telemetry.
 
 ## Removing everything
 
-`baton uninstall` removes the hooks and skills it installed. Delete `~/.baton` to remove the ledger.
+`baton uninstall` removes the hooks and skills it installed, and stops the Claude desktop sync if it is on. Delete `~/.baton` to remove the ledger.
