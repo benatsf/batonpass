@@ -49,7 +49,7 @@ Existing history is read on the first `baton ingest` (the last 30 days, at most 
 
 ## Claude desktop: every session in every account
 
-Claude desktop's Code tab lists only the sessions started under the signed-in account, although every transcript stays in `~/.claude/projects`. Codex lists every local session whatever the account. `baton desktop enable` gives Claude the same behaviour on macOS: every minute it copies each session's sidebar record into the other accounts' folders, without the parts tied to one account (connectors, Remote Control, scheduled tasks). Sessions show up the next time you switch account, and a session deleted in one account is hidden in the others. It backs up the session list first and never touches transcripts. How it works and what to expect: [docs/claude-desktop-sync.md](docs/claude-desktop-sync.md).
+Claude desktop's Code tab lists only the sessions started under the signed-in account, although every transcript stays in `~/.claude/projects`. Codex lists every local session whatever the account. `baton desktop enable` gives Claude the same behaviour on macOS: every minute it copies each session's sidebar record into the other accounts' folders, without the parts tied to one account (connectors, Remote Control, scheduled tasks). Sessions show up the next time you switch account, and a session deleted in one account is hidden in the others. It backs up the session list first and never touches transcripts. Claude closes each session's browser tabs at a switch; when a session resumes, batonpass tells it which pages it had open so it can reopen them. How it works and what to expect: [docs/claude-desktop-sync.md](docs/claude-desktop-sync.md).
 
 ## Messages between agents
 

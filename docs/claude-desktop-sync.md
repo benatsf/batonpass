@@ -46,6 +46,14 @@ baton desktop disable    # stop the background job
 - Deleting a session hides it everywhere but frees no disk space: while another account still lists a session, Claude keeps its transcript instead of deleting it. It stays resumable with `claude --resume <id>`.
 - Opening the same session in two accounts at once makes two Claude processes write to one transcript. Finish in one before continuing in the other.
 
+## Browser tabs and cookies
+
+Signing out of Claude closes every tab in every session's built-in browser, and empties the browser's cookie jar, which all sessions share. Claude keeps those tabs only in memory, also closes them after 30 idle minutes, and offers no way for another program to reopen them. So batonpass cannot put them back the way it puts back sidebar records.
+
+What it does instead: when a Claude Code session resumes, the SessionStart hook adds the pages that session's agent had open, newest first. It rebuilds the list from the agent's own browser calls in the ledger (the last 14 days, at most 8 pages), after reading any turn the switch cut short. Continue the session, for example with "reopen your tabs", and the agent reopens the ones the work needs. Pages you opened yourself are not in the transcript, so they are not listed. This needs only the hooks (`baton install`), not `baton desktop enable`.
+
+Cookies come back through Claude's own Chrome import, which refills the jar from Chrome after you sign in. A site you signed into only inside the built-in browser has to be signed into again; signing into it in Chrome as well makes it survive the next switch. batonpass does not copy the cookie jar: that would mean keeping a second copy of every web login and replacing a database Claude keeps open.
+
 ## Limits
 
 This relies on how Claude desktop stores its sidebar, which is undocumented and was checked against Claude desktop 2.26454 (October 2026). If an update changes it, `baton desktop disable` stops the job; the backup restores the previous state.

@@ -4,6 +4,7 @@ import { ingest } from './ingest.ts';
 import { DELIVERY_MAX_CHARS, MESSAGE_FRAME_CHARS, renderMessages } from './messages.ts';
 import { withStaleWarning } from './render.ts';
 import { refresh } from './snapshot.ts';
+import { BROWSER_TOOL_PREFIX, openPages, renderTabs } from './tabs.ts';
 
 export type HookTool = 'codex' | 'claude';
 
@@ -51,14 +52,39 @@ function parseInput(stdin: string): HookInput {
   return value as HookInput;
 }
 
-function sessionStart(ctx: Context, input: HookInput): string {
+/** Browser pages older than this are not offered back to a resumed session. */
+const TAB_LOOKBACK_MS = 14 * 86_400_000;
+
+/** The pages a resumed Claude Code session had open in Claude desktop's browser, which closed them. */
+function browserTabs(ctx: Context, projectId: string, input: HookInput): string {
+  // A turn cut short by an account switch never reached Stop: read what it added, if this file is known.
+  if (input.transcript_path && ctx.ledger.getSource(input.transcript_path)) {
+    try {
+      ingest(ctx, { onlyPaths: [input.transcript_path] });
+    } catch {
+      // The pages recorded so far are still worth offering.
+    }
+  }
+  const since = new Date((ctx.now ?? (() => new Date()))().getTime() - TAB_LOOKBACK_MS).toISOString();
+  const pages = openPages(ctx.ledger.toolCalls(projectId, 'claude', input.session_id!, BROWSER_TOOL_PREFIX, since));
+  return pages.length ? renderTabs(pages) : '';
+}
+
+function sessionStart(ctx: Context, tool: HookTool, input: HookInput): string {
   if (ctx.env.BATON_SKIP_INJECT === '1' || !input.cwd) return '';
   const project = ctx.resolve(input.cwd);
+  const parts: string[] = [];
   const snapshot = ctx.ledger.latestSnapshot(project.id);
-  if (!snapshot) return '';
-  const lag = staleSeconds(ctx, project.id, snapshot.createdAt);
-  const brief = lag > ctx.config.render.staleAfterSeconds ? withStaleWarning(snapshot.brief, lag) : snapshot.brief;
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: brief } });
+  if (snapshot) {
+    const lag = staleSeconds(ctx, project.id, snapshot.createdAt);
+    parts.push(lag > ctx.config.render.staleAfterSeconds ? withStaleWarning(snapshot.brief, lag) : snapshot.brief);
+  }
+  if (tool === 'claude' && input.source === 'resume' && input.session_id) {
+    const tabs = browserTabs(ctx, project.id, input);
+    if (tabs) parts.push(tabs);
+  }
+  if (!parts.length) return '';
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n\n') } });
 }
 
 /** Hooks time out after 5 s: give up on a busy ledger well before, and deliver at the next boundary. */
@@ -141,7 +167,7 @@ export async function runHook(event: string, tool: HookTool, stdin: string, make
     if (!name) return '';
     ctx = makeContext();
     if (ctx.env.BATON_HOOK === '1') return '';
-    if (name === 'session-start') return sessionStart(ctx, input);
+    if (name === 'session-start') return sessionStart(ctx, tool, input);
     if (name === 'pre-compact') {
       preCompact(ctx, tool, input);
       return '';
