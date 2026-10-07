@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- `baton desktop enable` no longer prints "Boot-out failed: 3: No such process" the first time: it asks launchctl to unload the background job only when one was installed before.
+
 ## 0.3.0
 
 - `baton desktop` (macOS, opt-in): keeps Claude desktop's Code-tab sessions visible in every Claude account signed in on the Mac. `enable` backs up the session list and installs a LaunchAgent that syncs every minute; `status`, `sync [--dry-run]` and `disable` complete it. Copies drop connector, Remote Control, scheduled-task and cloud fields; deletions spread as hidden, quarantined copies; transcripts are never touched. See `docs/claude-desktop-sync.md`.
