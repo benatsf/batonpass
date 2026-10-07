@@ -6,6 +6,8 @@ import { parseArgs } from 'node:util';
 import { doctor, inbox, ingestCommand, note, resume, search, send, show, status, type Command } from './commands.ts';
 import { defaultConfig, ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
+import { desktopCommand, stopAgent } from './desktop-command.ts';
+import { desktopPaths } from './desktop.ts';
 import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATEGIES, writeScorecard, type Strategy } from './eval.ts';
 import { normalizeEvent, runHook } from './hooks.ts';
 import { applyPlan, defaultLauncher, installPaths, planInstall, planUninstall, readSkills, renderDiff } from './install.ts';
@@ -114,7 +116,7 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
   return 0;
 }
 
-function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
+async function installCommand(args: string[], io: CliIO, uninstall: boolean): Promise<number> {
   const { values } = parseArgs({ args, options: { claude: { type: 'boolean' }, codex: { type: 'boolean' }, 'dry-run': { type: 'boolean' } } });
   const config = loadConfig(io.env);
   ensureHome(config.home);
@@ -130,6 +132,7 @@ function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
   }
   applyPlan(paths, plan, now);
   for (const line of plan.notes) io.out(`${line}\n`);
+  if (uninstall && (await stopAgent(desktopPaths(io.env, config.home, config.sources.claudeProjects), io))) io.out('Stopped the Claude desktop session sync.\n');
   return 0;
 }
 
@@ -181,6 +184,8 @@ Commands:
   resume <codex|claude>          Start the other tool here, primed with the brief
   doctor                         Check installation and data health
   install | uninstall            Add or remove hooks and the batonpass skills
+  desktop [status|sync|enable|disable]
+                                 Keep Claude desktop Code-tab sessions visible in every account (macOS)
   eval                           Run the recall evaluation
   hook <event> --tool <tool>     Hook entry point (called by Codex and Claude Code)
 `;
@@ -207,10 +212,17 @@ export async function main(argv: string[], io: CliIO = defaultIO(), makeContext:
         io.err(`${error instanceof Error ? error.message : String(error)}\n`);
         return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
       }
+    case 'desktop':
+      try {
+        return await desktopCommand(rest, io);
+      } catch (error) {
+        io.err(`baton desktop failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
+      }
     case 'install':
     case 'uninstall':
       try {
-        return installCommand(rest, io, command === 'uninstall');
+        return await installCommand(rest, io, command === 'uninstall');
       } catch (error) {
         io.err(`${error instanceof Error ? error.message : String(error)}\n`);
         return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;

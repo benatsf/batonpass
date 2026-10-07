@@ -21,7 +21,7 @@ export interface Context extends RefreshDeps {
 
 const LOG_MAX_BYTES = 1024 * 1024;
 
-function appendLog(home: string, event: string, detail: Record<string, unknown>): void {
+export function appendLog(home: string, event: string, detail: Record<string, unknown>): void {
   const path = join(home, 'logs', 'baton.log');
   try {
     if (statSync(path).size > LOG_MAX_BYTES) renameSync(path, `${path}.1`);
