@@ -2,7 +2,7 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.1
 
 - A resumed Claude Code session is told which pages its agent had open in Claude desktop's built-in browser (from its own browser calls, last 14 days, at most 8), because Claude closes those tabs when the account changes and after 30 idle minutes. The SessionStart hook first reads any turn the switch cut short.
 - `baton desktop enable` no longer prints "Boot-out failed: 3: No such process" the first time: it asks launchctl to unload the background job only when one was installed before.
