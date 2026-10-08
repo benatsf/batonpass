@@ -266,6 +266,17 @@ export class Ledger {
     return kinds ? events.filter((e) => kinds.includes(e.kind)) : events;
   }
 
+  /** One session's tool calls whose text starts with `prefix`, since `since`, oldest first. */
+  toolCalls(projectId: string, tool: string, sessionId: string, prefix: string, since: string): StoredEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM events WHERE project_id = ? AND ts >= ? AND tool = ? AND session_id = ? AND kind = 'tool_call'
+         AND substr(text, 1, ?) = ? ORDER BY ts, id`,
+      )
+      .all(projectId, since, tool, sessionId, prefix.length, prefix) as Row[];
+    return rows.map(toEvent);
+  }
+
   sessions(projectId: string): SessionRow[] {
     const rows = this.db.prepare('SELECT * FROM sessions WHERE project_id = ? ORDER BY last_ts DESC').all(projectId) as Row[];
     return rows.map((r) => ({
