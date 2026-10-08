@@ -4,6 +4,8 @@
 
 Transcript files of Codex (`~/.codex/sessions/**/rollout-*.jsonl`, `~/.codex/session_index.jsonl`) and Claude Code (`~/.claude/projects/*/*.jsonl`). They are opened read-only and never modified, moved or deleted.
 
+With `baton desktop enable` (macOS, off by default), batonpass also reads and writes Claude desktop's Code-tab session records in `~/Library/Application Support/Claude/claude-code-sessions/` and reads `~/Library/Logs/Claude/main.log*` to tell which account is loaded. It copies records between account folders on this Mac, keeps a backup and quarantined copies in `~/.baton/desktop-sync/`, sends nothing anywhere, and never opens transcripts for writing. See [claude-desktop-sync.md](claude-desktop-sync.md).
+
 ## What is stored
 
 In `~/.baton/baton.db` (SQLite, file mode `0600`, directory `0700`):
@@ -12,9 +14,10 @@ In `~/.baton/baton.db` (SQLite, file mode `0600`, directory `0700`):
 - tool call names with abbreviated inputs (at most 300 characters), after redaction;
 - goals, session titles, pull request links, compaction markers, token usage and cost figures;
 - your `baton note` entries, after redaction;
+- messages sent with `baton send`, after redaction, with sender, recipient and delivery time;
 - rendered snapshots and cached Jev scores.
 
-Tool outputs (command output, file contents, web pages) are never stored as such. Claude Code's compaction summaries are stored after redaction; the model writes them from the whole context, so they can paraphrase tool output. Events older than 90 days and all but the latest 50 snapshots per project are pruned.
+Tool outputs (command output, file contents, web pages) are never stored as such. Claude Code's compaction summaries are stored after redaction; the model writes them from the whole context, so they can paraphrase tool output. Events and messages older than 90 days and all but the latest 50 snapshots per project are pruned.
 
 ## Redaction
 
@@ -30,4 +33,4 @@ There is no telemetry.
 
 ## Removing everything
 
-`baton uninstall` removes the hooks and skills it installed. Delete `~/.baton` to remove the ledger.
+`baton uninstall` removes the hooks and skills it installed, and stops the Claude desktop sync if it is on. Delete `~/.baton` to remove the ledger.

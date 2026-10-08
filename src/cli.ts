@@ -1,16 +1,18 @@
 import { spawn as spawnProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { doctor, ingestCommand, note, resume, search, show, status, type Command } from './commands.ts';
+import { doctor, inbox, ingestCommand, note, resume, search, send, show, status, type Command } from './commands.ts';
 import { defaultConfig, ensureHome, loadConfig } from './config.ts';
 import { createContext, type Context } from './context.ts';
+import { desktopCommand, stopAgent } from './desktop-command.ts';
+import { desktopPaths } from './desktop.ts';
 import { CASES_DIR, commandAnswerer, loadCases, renderScorecard, runEval, STRATEGIES, writeScorecard, type Strategy } from './eval.ts';
 import { normalizeEvent, runHook } from './hooks.ts';
-import { applyPlan, defaultLauncher, installPaths, planInstall, planUninstall, renderDiff, SKILL_SOURCE } from './install.ts';
+import { applyPlan, defaultLauncher, installPaths, planInstall, planUninstall, readSkills, renderDiff } from './install.ts';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.3.1';
 
 export interface CliIO {
   out(text: string): void;
@@ -81,7 +83,7 @@ export function captureIO(overrides: Partial<CliIO> = {}): CliIO & { stdout: str
 
 export type ContextFactory = (env: NodeJS.ProcessEnv) => Context;
 
-const COMMANDS: Record<string, Command> = { status, show, ingest: ingestCommand, search, note, resume, doctor };
+const COMMANDS: Record<string, Command> = { status, show, ingest: ingestCommand, search, note, send, inbox, resume, doctor };
 
 /** Only what the refresh needs: environment variables are size-limited (128 KiB each on Linux). */
 function stopInput(stdin: string): string {
@@ -100,13 +102,13 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
     const event = String(positionals[0] ?? '');
     const detachedRun = io.env.BATON_DETACHED === '1';
     const input = detachedRun ? (io.env.BATON_HOOK_INPUT ?? '') : await io.readStdin();
+    const stopping = normalizeEvent(event) === 'stop';
     // A tool may end the session right after Stop (`claude -p`, closing the app), killing
-    // its hook processes. The refresh therefore runs in a detached process of its own.
-    if (normalizeEvent(event) === 'stop' && !detachedRun) {
-      io.spawnDetached(['hook', ...args], { ...io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: stopInput(input) });
-      return 0;
-    }
-    const out = await runHook(event, tool, input, () => makeContext(io.env));
+    // its hook processes. The refresh therefore runs in a detached process of its own,
+    // while this one only delivers pending messages, whose output the tool reads.
+    if (stopping && !detachedRun) io.spawnDetached(['hook', ...args], { ...io.env, BATON_DETACHED: '1', BATON_HOOK_INPUT: stopInput(input) });
+    const options = stopping ? { stop: detachedRun ? ('refresh' as const) : ('deliver' as const) } : {};
+    const out = await runHook(event, tool, input, () => makeContext(io.env), options);
     if (out) io.out(`${out}\n`);
   } catch {
     // A hook never fails the calling session.
@@ -114,14 +116,14 @@ async function hookCommand(args: string[], io: CliIO, makeContext: ContextFactor
   return 0;
 }
 
-function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
+async function installCommand(args: string[], io: CliIO, uninstall: boolean): Promise<number> {
   const { values } = parseArgs({ args, options: { claude: { type: 'boolean' }, codex: { type: 'boolean' }, 'dry-run': { type: 'boolean' } } });
   const config = loadConfig(io.env);
   ensureHome(config.home);
   const paths = installPaths(io.env, config.home);
   const target = values.claude || values.codex ? { claude: Boolean(values.claude), codex: Boolean(values.codex) } : { claude: true, codex: true };
   const now = new Date();
-  const plan = uninstall ? planUninstall(paths) : planInstall(paths, target, defaultLauncher(), readFileSync(SKILL_SOURCE, 'utf8'), now);
+  const plan = uninstall ? planUninstall(paths) : planInstall(paths, target, defaultLauncher(), readSkills(), now);
   if (plan.changes.length) io.out(`${renderDiff(plan.changes)}\n\n`);
   else io.out('Nothing to change.\n');
   if (values['dry-run']) {
@@ -130,6 +132,7 @@ function installCommand(args: string[], io: CliIO, uninstall: boolean): number {
   }
   applyPlan(paths, plan, now);
   for (const line of plan.notes) io.out(`${line}\n`);
+  if (uninstall && (await stopAgent(desktopPaths(io.env, config.home, config.sources.claudeProjects), io))) io.out('Stopped the Claude desktop session sync.\n');
   return 0;
 }
 
@@ -174,9 +177,15 @@ Commands:
   ingest [--all] [--project id]  Read new transcript lines and render snapshots now
   search <words…>                Search this project's redacted history
   note <text…>                   Pin a note into every future snapshot of this project
+  send [--to <codex|claude>] <text…>
+                                 Message the other agent working on this project
+  inbox [--tool <codex|claude>] [--ack] [--all]
+                                 List this project's messages; --ack marks them read
   resume <codex|claude>          Start the other tool here, primed with the brief
   doctor                         Check installation and data health
-  install | uninstall            Add or remove hooks and the baton-resume skill
+  install | uninstall            Add or remove hooks and the batonpass skills
+  desktop [status|sync|enable|disable]
+                                 Keep Claude desktop Code-tab sessions visible in every account (macOS)
   eval                           Run the recall evaluation
   hook <event> --tool <tool>     Hook entry point (called by Codex and Claude Code)
 `;
@@ -203,10 +212,17 @@ export async function main(argv: string[], io: CliIO = defaultIO(), makeContext:
         io.err(`${error instanceof Error ? error.message : String(error)}\n`);
         return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
       }
+    case 'desktop':
+      try {
+        return await desktopCommand(rest, io);
+      } catch (error) {
+        io.err(`baton desktop failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;
+      }
     case 'install':
     case 'uninstall':
       try {
-        return installCommand(rest, io, command === 'uninstall');
+        return await installCommand(rest, io, command === 'uninstall');
       } catch (error) {
         io.err(`${error instanceof Error ? error.message : String(error)}\n`);
         return (error as NodeJS.ErrnoException).code?.startsWith('ERR_PARSE_ARGS') ? 2 : 1;

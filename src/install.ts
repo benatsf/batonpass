@@ -2,14 +2,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseToml } from 'smol-toml';
 import type { Check } from './commands.ts';
 
 export interface InstallPaths {
   claudeSettings: string;
   codexHooks: string;
   codexConfig: string;
-  claudeSkill: string;
-  codexSkill: string;
+  /** Each tool's skills directory; a skill lives in `<dir>/<name>/SKILL.md`. */
+  skillDirs: { claude: string; codex: string };
   manifest: string;
   backups: string;
   /** Stable hook entry point; hooks never name a versioned Node path directly. */
@@ -53,7 +54,19 @@ type HookMap = Record<string, Group[]>;
 const CODEX_DESCRIPTION = 'Hooks installed by batonpass (baton uninstall removes them)';
 const MATCHER = 'startup|resume|clear|compact';
 
-export const SKILL_SOURCE = fileURLToPath(new URL('../integrations/skills/baton-resume/SKILL.md', import.meta.url));
+export const SKILL_NAMES = ['baton-resume', 'baton-message'] as const;
+export type SkillName = (typeof SKILL_NAMES)[number];
+export const SKILL_SOURCES = Object.fromEntries(
+  SKILL_NAMES.map((name) => [name, fileURLToPath(new URL(`../integrations/skills/${name}/SKILL.md`, import.meta.url))]),
+) as Record<SkillName, string>;
+
+export function readSkills(): Record<SkillName, string> {
+  return Object.fromEntries(SKILL_NAMES.map((name) => [name, readFileSync(SKILL_SOURCES[name], 'utf8')])) as Record<SkillName, string>;
+}
+
+export function skillPath(paths: InstallPaths, tool: 'claude' | 'codex', name: SkillName): string {
+  return join(paths.skillDirs[tool], name, 'SKILL.md');
+}
 
 export function installPaths(env: NodeJS.ProcessEnv, batonHome: string): InstallPaths {
   const home = env.HOME ?? homedir();
@@ -62,8 +75,7 @@ export function installPaths(env: NodeJS.ProcessEnv, batonHome: string): Install
     claudeSettings: join(home, '.claude', 'settings.json'),
     codexHooks: join(codexHome, 'hooks.json'),
     codexConfig: join(codexHome, 'config.toml'),
-    claudeSkill: join(home, '.claude', 'skills', 'baton-resume', 'SKILL.md'),
-    codexSkill: join(codexHome, 'skills', 'baton-resume', 'SKILL.md'),
+    skillDirs: { claude: join(home, '.claude', 'skills'), codex: join(codexHome, 'skills') },
     manifest: join(batonHome, 'install.json'),
     backups: join(batonHome, 'backups'),
     launcher: join(batonHome, 'bin', 'baton'),
@@ -108,7 +120,10 @@ function entries(tool: 'claude' | 'codex', command: string): Array<{ event: stri
   if (tool === 'codex') Object.assign(start, { additionalContextLimit: 2500, statusMessage: 'Loading batonpass context' });
   return [
     { event: 'SessionStart', group: { matcher: MATCHER, hooks: [start] } },
-    // Stop only hands the refresh to a detached process (about 0.1 s), so it runs synchronously.
+    // Message delivery. With nothing pending each run is one indexed query, so they stay synchronous.
+    { event: 'UserPromptSubmit', group: { hooks: [{ type: 'command', command: cmd('user-prompt-submit'), timeout: 5 }] } },
+    { event: 'PostToolUse', group: { matcher: '*', hooks: [{ type: 'command', command: cmd('post-tool-use'), timeout: 5 }] } },
+    // Stop hands the refresh to a detached process (about 0.1 s) and delivers messages, so it runs synchronously.
     { event: 'Stop', group: { hooks: [{ type: 'command', command: cmd('stop'), timeout: 30 }] } },
     { event: 'PreCompact', group: { hooks: [{ type: 'command', command: cmd('pre-compact'), timeout: 10 }] } },
   ];
@@ -129,8 +144,13 @@ function parseJson(path: string, text: string | null, fallback: Json): Json {
   }
 }
 
-/** Removes our handlers. Install keeps emptied event keys so the file's key order survives a reinstall. */
-function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolean): void {
+/**
+ * Removes our handlers and returns, per event, the index our first group had, so a reinstall puts
+ * it back in place (Codex keys hook trust by position). Install keeps emptied event keys so the
+ * file's key order survives a reinstall.
+ */
+function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolean): Record<string, number> {
+  const positions: Record<string, number> = {};
   for (const [event, groups] of Object.entries(hooks)) {
     if (!Array.isArray(groups)) continue;
     const kept: Group[] = [];
@@ -140,11 +160,27 @@ function removeCommands(hooks: HookMap, commands: Set<string>, dropEmpty: boolea
         kept.push(group);
         continue;
       }
+      positions[event] ??= kept.length;
       const rest = handlers.filter((h) => !commands.has(String(h.command)));
       if (rest.length) kept.push({ ...group, hooks: rest });
     }
     if (kept.length || !dropEmpty) hooks[event] = kept;
     else delete hooks[event];
+  }
+  return positions;
+}
+
+/**
+ * Whether config.toml defines hooks itself: an event (`[[hooks.Stop]]`, `Stop = [...]`) holds a list
+ * of groups. Codex also keeps its trust records there (`[hooks.state."<key>"]`), which are not hooks.
+ */
+function hasInlineHooks(configText: string): boolean {
+  try {
+    const hooks = parseToml(configText).hooks;
+    return typeof hooks === 'object' && hooks !== null && Object.values(hooks).some(Array.isArray);
+  } catch {
+    // Codex cannot read an unparsable config either, so it has no hooks to merge.
+    return false;
   }
 }
 
@@ -155,7 +191,7 @@ function readManifest(path: string): Manifest | null {
 
 const serialize = (value: Json) => `${JSON.stringify(value, null, 2)}\n`;
 
-export function planInstall(paths: InstallPaths, target: { claude: boolean; codex: boolean }, launcher: Launcher, skillText: string, now: Date): InstallPlan {
+export function planInstall(paths: InstallPaths, target: { claude: boolean; codex: boolean }, launcher: Launcher, skills: Record<SkillName, string>, now: Date): InstallPlan {
   const previous = readManifest(paths.manifest);
   const command = quote(paths.launcher);
   const tools = (['claude', 'codex'] as const).filter((tool) => target[tool]);
@@ -171,16 +207,21 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     const fallback: Json = tool === 'codex' ? { description: CODEX_DESCRIPTION, hooks: {} } : {};
     const doc = parseJson(path, before, fallback);
     const hooks = (typeof doc.hooks === 'object' && doc.hooks !== null ? doc.hooks : {}) as HookMap;
-    removeCommands(hooks, stale, false);
-    for (const { event, group } of entries(tool, command)) (hooks[event] ??= []).push(group);
+    const positions = removeCommands(hooks, stale, false);
+    for (const { event, group } of entries(tool, command)) {
+      const groups = (hooks[event] ??= []);
+      groups.splice(positions[event] ?? groups.length, 0, group);
+    }
     doc.hooks = hooks;
     const after = serialize(doc);
     if (before === null) created.add(path);
     files.push(path);
     if (after !== before) changes.push({ path, before, after });
-    const skill = tool === 'claude' ? paths.claudeSkill : paths.codexSkill;
-    const skillBefore = readText(skill);
-    if (skillBefore !== skillText) changes.push({ path: skill, before: skillBefore, after: skillText });
+    for (const name of SKILL_NAMES) {
+      const skill = skillPath(paths, tool, name);
+      const skillBefore = readText(skill);
+      if (skillBefore !== skills[name]) changes.push({ path: skill, before: skillBefore, after: skills[name] });
+    }
   }
 
   const launcherText = launcherScript(launcher);
@@ -191,9 +232,8 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     'batonpass keeps everything in ~/.baton. The default strategy makes no network calls; see docs/privacy.md before enabling jev-select, which sends redacted dialogue text to TypeSafe.',
   ];
   if (target.codex) {
-    notes.push('Codex asks you to review and trust new hooks: open Codex, run /hooks, and trust the three batonpass hooks.');
-    const config = readText(paths.codexConfig) ?? '';
-    if (/^\s*\[\[?hooks[.\]]/m.test(config)) notes.push('Your Codex config.toml also has inline [hooks]; Codex merges both and warns at startup.');
+    notes.push('Codex runs a new hook only after you trust it: open Codex, run /hooks, and trust the batonpass hooks (message delivery at prompts and tool calls needs the UserPromptSubmit and PostToolUse ones).');
+    if (hasInlineHooks(readText(paths.codexConfig) ?? '')) notes.push('Your Codex config.toml also has inline [hooks]; Codex merges both and warns at startup.');
   }
   const manifest: Manifest = {
     version: 1,
@@ -202,7 +242,7 @@ export function planInstall(paths: InstallPaths, target: { claude: boolean; code
     commands: [...new Set([...(previous?.commands ?? []).filter((c) => !commands.some((n) => n.split(' hook ')[1] === c.split(' hook ')[1])), ...commands])],
     files: [...new Set([...(previous?.files ?? []), ...files])],
     created: [...created],
-    skills: [...new Set([...(previous?.skills ?? []), ...tools.map((t) => (t === 'claude' ? paths.claudeSkill : paths.codexSkill))])],
+    skills: [...new Set([...(previous?.skills ?? []), ...tools.flatMap((t) => SKILL_NAMES.map((name) => skillPath(paths, t, name)))])],
     launcher: paths.launcher,
   };
   return { changes, manifest, notes };
@@ -286,10 +326,12 @@ export function hookStatus(paths: InstallPaths): Check[] {
   if (!manifest) return [[null, 'Hooks not installed: run `baton install`']];
   const checks: Check[] = manifest.tools.map((tool) => {
     const text = readText(tool === 'claude' ? paths.claudeSettings : paths.codexHooks) ?? '';
-    const mine = manifest.commands.filter((c) => c.endsWith(`--tool ${tool}`));
-    const present = mine.filter((c) => text.includes(JSON.stringify(c))).length;
+    // Compare with what this version installs, so an upgrade that added hooks is noticed.
+    const expected = entries(tool, quote(paths.launcher)).map((e) => String(e.group.hooks![0]!.command));
+    const present = expected.filter((c) => text.includes(JSON.stringify(c))).length;
     const label = tool === 'claude' ? 'Claude Code' : 'Codex';
-    return [present === mine.length && present > 0, `${label} hooks installed (${present} of ${mine.length})`] as Check;
+    const missing = present < expected.length ? ': run `baton install` to add the missing ones' : '';
+    return [present === expected.length, `${label} hooks installed (${present} of ${expected.length})${missing}`] as Check;
   });
   const targets = launcherTargets(readText(paths.launcher) ?? '');
   if (!targets || !existsSync(targets.node) || !existsSync(targets.script)) {

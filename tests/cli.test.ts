@@ -26,3 +26,11 @@ test('exits quietly when stdout is closed early, as with `baton status | head`',
   assert.equal(stderr, '');
   assert.equal(code, 0);
 });
+
+test('the CLI, the npm package and the Claude Code plugin report the same version', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as { version: string };
+  assert.equal(read('../package.json').version, VERSION);
+  assert.equal(read('../package-lock.json').version, VERSION);
+  assert.equal(read('../integrations/claude-plugin/.claude-plugin/plugin.json').version, VERSION);
+});
