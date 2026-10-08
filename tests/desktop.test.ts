@@ -306,7 +306,7 @@ test('the LaunchAgent runs the launcher every minute with this batonpass home', 
   assert.deepEqual(agent.EnvironmentVariables, { BATON_HOME: '/Users/me/.baton' });
 });
 
-test('baton desktop enable backs up, syncs once and loads the agent; disable unloads it', { skip: process.platform !== 'darwin' }, async () => {
+test('baton desktop enable backs up, syncs once and loads the agent, reloads it when run again; disable unloads it', { skip: process.platform !== 'darwin' }, async () => {
   const { root, home, paths } = fixture();
   const now = Date.now();
   folder(paths, A);
@@ -324,8 +324,15 @@ test('baton desktop enable backs up, syncs once and loads the agent; disable unl
   assert.ok(existsSync(paths.agent));
   assert.ok(existsSync(join(dir(paths, B), `${rec.sessionId}.json`)));
   assert.equal(readdirSync(join(home, 'desktop-sync', 'backups')).length, 1);
-  assert.deepEqual(calls.at(-1), ['launchctl', 'bootstrap', `gui/${process.getuid!()}`, paths.agent]);
+  // A first enable has nothing to unload, so launchctl is not asked to (it would print an error).
+  assert.deepEqual(calls, [['launchctl', 'bootstrap', `gui/${process.getuid!()}`, paths.agent]]);
   assert.match(io.stdout.join(''), /First sync: copied 1/);
+
+  assert.equal(await main(['desktop', 'enable'], io), 0);
+  assert.deepEqual(calls.slice(1), [
+    ['launchctl', 'bootout', `gui/${process.getuid!()}/${AGENT_LABEL}`],
+    ['launchctl', 'bootstrap', `gui/${process.getuid!()}`, paths.agent],
+  ]);
 
   assert.equal(await main(['desktop', 'disable'], io), 0);
   assert.equal(existsSync(paths.agent), false);

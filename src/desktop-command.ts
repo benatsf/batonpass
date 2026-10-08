@@ -43,9 +43,10 @@ function renderLayout(plan: SyncPlan): string {
 const uid = () => process.getuid?.() ?? 501;
 
 async function startAgent(paths: DesktopPaths, io: CliIO, launcher: string, home: string): Promise<boolean> {
+  // Unload a previous copy first; on a first enable there is none, and launchctl would print an error.
+  if (existsSync(paths.agent)) await io.spawn('launchctl', ['bootout', `gui/${uid()}/${AGENT_LABEL}`], { cwd: io.cwd, env: io.env });
   mkdirSync(dirname(paths.agent), { recursive: true });
   writeFileSync(paths.agent, agentPlist(launcher, home, join(home, 'logs', 'desktop-sync.err')), { mode: 0o644 });
-  await io.spawn('launchctl', ['bootout', `gui/${uid()}/${AGENT_LABEL}`], { cwd: io.cwd, env: io.env });
   return (await io.spawn('launchctl', ['bootstrap', `gui/${uid()}`, paths.agent], { cwd: io.cwd, env: io.env })) === 0;
 }
 
