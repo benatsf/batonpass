@@ -6,6 +6,8 @@ Finish a turn in Codex, open Claude Code in the same repository, and it already 
 
 While both work on the same repository, either one (or you) can also message the other with `baton send`; the message shows up in the other agent at its next prompt, tool call or turn end.
 
+![A real Codex turn on a demo repo, then a fresh Claude Code session in the same repo that already knows what Codex did and the rule it was given](docs/demo.gif)
+
 ## How it works
 
 - **`Stop` hook** (both tools, runs in the background): reads the new lines of the session transcript, removes secrets, stores the dialogue in a local SQLite ledger (`~/.baton/baton.db`) and renders a numbered snapshot of the project.
