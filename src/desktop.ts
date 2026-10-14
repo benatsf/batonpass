@@ -25,6 +25,8 @@ export interface DesktopPaths {
   options: string;
   /** Sessions batonpass detached from their parent, so `flat off` can attach them again. */
   detached: string;
+  /** Claude Code's `<pid>.json` files for running sessions. */
+  liveSessions: string;
 }
 
 export interface Folder {
@@ -115,6 +117,7 @@ export function desktopPaths(env: NodeJS.ProcessEnv, batonHome: string, claudePr
     work: join(batonHome, 'desktop-sync'),
     options: join(batonHome, 'desktop-sync', 'options.json'),
     detached: join(batonHome, 'desktop-sync', 'detached.json'),
+    liveSessions: join(home, '.claude', 'sessions'),
   };
 }
 
@@ -198,14 +201,21 @@ export function discover(paths: DesktopPaths, now: number, running = true): Layo
   return { folders, active, settling: Boolean(last && now - last.at < SETTLE_MS), running };
 }
 
-interface Copy {
+/** Every real account/org folder, whether or not Claude has loaded it. */
+export function allFolders(paths: DesktopPaths): Folder[] {
+  return realDirs(paths.store).flatMap((account) =>
+    realDirs(join(paths.store, account)).map((org) => ({ account, org, path: join(paths.store, account, org) })),
+  );
+}
+
+export interface Copy {
   folder: Folder;
   file: string;
   mtimeMs: number;
   record: Record<string, unknown>;
 }
 
-function readCopies(folder: Folder): Copy[] {
+export function readCopies(folder: Folder): Copy[] {
   const copies: Copy[] = [];
   for (const name of recordFiles(folder)) {
     const file = join(folder.path, name);
@@ -225,7 +235,7 @@ function readCopies(folder: Folder): Copy[] {
 }
 
 /** `deleted_<id>` holds the deletion time in milliseconds. */
-function tombstones(folder: Folder): Map<string, number> {
+export function tombstones(folder: Folder): Map<string, number> {
   const out = new Map<string, number>();
   try {
     for (const name of readdirSync(folder.path)) {
@@ -254,7 +264,7 @@ function transcripts(projects: string): Map<string, number> {
   return out;
 }
 
-const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
+export const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 /**
  * The folder Claude has loaded is only added to. When the log does not say which one it is, none is
  * changed. With Claude quit, nothing is loaded.

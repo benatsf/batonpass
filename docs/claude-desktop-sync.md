@@ -36,6 +36,7 @@ baton desktop enable     # back up the session list, sync once, then every minut
 baton desktop sync       # run one sync now (--dry-run shows it without writing)
 baton desktop disable    # stop the background job
 baton desktop flat on    # sessions at the top level, not nested under their parent
+baton desktop purge      # list deleted sessions' leftover files; --yes removes them
 ```
 
 `enable` copies `claude-code-sessions` to `~/.baton/desktop-sync/backups/<time>/` first, then installs the LaunchAgent `~/Library/LaunchAgents/batonpass.desktop-sync.plist`. `disable` and `baton uninstall` unload and remove it; copies already made stay, and Claude shows them like any other session. `baton doctor` reports whether the sync is on and whether it logged errors (`~/.baton/logs/desktop-sync.err`).
@@ -46,6 +47,17 @@ baton desktop flat on    # sessions at the top level, not nested under their par
 - Resuming a session under another account works and is billed to that account. Connectors the new account lacks are reported to the model as unavailable, Remote Control starts a fresh link without the earlier history, and extended thinking written under another organisation cannot be reused, so the first reply rereads the session at extra cost.
 - Deleting a session hides it everywhere but frees no disk space: while another account still lists a session, Claude keeps its transcript instead of deleting it. It stays resumable with `claude --resume <id>`.
 - Opening the same session in two accounts at once makes two Claude processes write to one transcript. Finish in one before continuing in the other.
+
+## Removing deleted sessions for good
+
+While another account still lists a session, Claude keeps its conversation file when you delete it, and batonpass then hides the other copies instead of deleting them. So a deleted session still takes disk space and can still be resumed with `claude --resume`.
+
+```bash
+baton desktop purge         # lists the deleted sessions whose files are left, and their size
+baton desktop purge --yes   # removes them for good
+```
+
+A conversation is listed only when Claude marked it deleted (a `deleted_<id>` file) and no account, archived sessions included, still lists it. A running session or a file written in the last ten minutes waits. Removing takes the transcript, its folder (subagents, tool results), Claude's own markers and batonpass's hidden copies; it touches nothing outside `~/.claude/projects` and `~/.baton/desktop-sync/quarantine`. It can't be undone: the session can no longer be resumed or searched in its transcript.
 
 ## A flat sidebar (Claude desktop 2.37 and later)
 

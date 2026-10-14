@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.4
+
+- `baton desktop purge [--yes]`: lists, then with `--yes` removes, the conversation files of sessions deleted in Claude desktop that no account lists any more (Claude keeps them while another account's copy claims them). Running sessions and files written in the last ten minutes wait; nothing outside `~/.claude/projects` and batonpass's quarantine is touched.
+
 ## 0.3.3
 
 - Flat sidebar: the `lineageDetached` flag is now also set in the folder Claude has loaded (idle sessions only), so quitting and reopening Claude right away is enough to see the open account flat. Claude reads its session files only at start-up and account switches; if it saves a session again from memory, a later run sets the flag again.
