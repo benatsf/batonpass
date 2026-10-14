@@ -5,7 +5,7 @@ import type { CliIO } from './cli.ts';
 import type { Check } from './commands.ts';
 import { ensureHome, loadConfig } from './config.ts';
 import { appendLog } from './context.ts';
-import { agentPlist, AGENT_LABEL, applySync, backupStore, desktopPaths, planSync, type DesktopPaths, type Folder, type SyncPlan } from './desktop.ts';
+import { agentPlist, AGENT_LABEL, applySync, backupStore, desktopPaths, planSync, readOptions, writeOptions, type DesktopPaths, type Folder, type SyncPlan } from './desktop.ts';
 import { installPaths } from './install.ts';
 import { tryLock } from './lock.ts';
 
@@ -18,17 +18,20 @@ Commands:
   sync [--dry-run]     Copy, update and hide session records across accounts now
   enable               Back up the session list, then sync every minute in the background
   disable              Stop the background sync (copies already made stay)
+  flat [on|off]        Show every session at the top level of the sidebar, not nested under
+                       the session it came from (Claude desktop 2.37 and later)
 `;
 
 const short = (f: Folder) => `${f.account.slice(0, 8)}…/${f.org.slice(0, 8)}…`;
 
 function renderPlan(plan: SyncPlan): string {
-  const counts = { create: 0, update: 0, quarantine: 0 };
+  const counts = { create: 0, update: 0, quarantine: 0, detach: 0, attach: 0 };
   for (const a of plan.actions) counts[a.kind]++;
-  const lines = [`copy ${counts.create}, update ${counts.update}, hide ${counts.quarantine}; ${plan.skipped.length} skipped`];
-  const label = { create: 'copy  ', update: 'update', quarantine: 'hide  ' };
+  const relink = counts.detach ? `, un-nest ${counts.detach}` : counts.attach ? `, re-nest ${counts.attach}` : '';
+  const lines = [`copy ${counts.create}, update ${counts.update}, hide ${counts.quarantine}${relink}; ${plan.skipped.length} skipped`];
+  const label = { create: 'copy    ', update: 'update  ', quarantine: 'hide    ', detach: 'un-nest ', attach: 're-nest ' };
   for (const a of plan.actions) lines.push(`  ${label[a.kind]} → ${short(a.folder)}  ${a.title}`);
-  for (const s of plan.skipped) lines.push(`  skip     ${s.title} (${s.reason})`);
+  for (const s of plan.skipped) lines.push(`  skip       ${s.title} (${s.reason})`);
   return lines.join('\n');
 }
 
@@ -90,7 +93,7 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
     io.out(USAGE);
     return 0;
   }
-  const { values } = parseArgs({ args: rest, options: { 'dry-run': { type: 'boolean' }, quiet: { type: 'boolean' } } });
+  const { values } = parseArgs({ args: rest, options: { 'dry-run': { type: 'boolean' }, quiet: { type: 'boolean' } }, allowPositionals: sub === 'flat' });
   if (process.platform !== 'darwin') {
     io.err('baton desktop works with the Claude desktop app on macOS only.\n');
     return 1;
@@ -104,6 +107,7 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
       const plan = planSync(paths, now().getTime());
       io.out(`Code-tab session folders (account/org):\n${renderLayout(plan)}\n\n`);
       io.out(`Background sync: ${existsSync(paths.agent) ? 'on, every minute' : 'off (`baton desktop enable` turns it on)'}\n`);
+      io.out(`Flat sidebar: ${readOptions(paths).flat ? 'on' : 'off'}\n`);
       if (plan.layout.settling) io.out('Claude is switching accounts; nothing would run right now.\n');
       else if (plan.layout.folders.length < 2) io.out('Only one account has used the Code tab here, so there is nothing to sync yet.\n');
       else io.out(`Next sync would: ${renderPlan(plan)}\n`);
@@ -124,7 +128,8 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
       }
       else {
         const r = run.result;
-        io.out(`Copied ${r.created}, updated ${r.updated}, hid ${r.quarantined}${r.raced ? `; ${r.raced} left alone because Claude wrote them meanwhile` : ''}.\n${renderPlan(run.plan)}\n`);
+        const relink = r.detached ? `, un-nested ${r.detached}` : r.attached ? `, re-nested ${r.attached}` : '';
+        io.out(`Copied ${r.created}, updated ${r.updated}, hid ${r.quarantined}${relink}${r.raced ? `; ${r.raced} left alone because Claude wrote them meanwhile` : ''}.\n${renderPlan(run.plan)}\n`);
       }
       return 0;
     }
@@ -155,6 +160,30 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
     case 'disable': {
       const stopped = await stopAgent(paths, io);
       io.out(stopped ? 'Background sync is off. Copies already made stay, and so does the backup in ~/.baton/desktop-sync.\n' : 'Background sync was not on.\n');
+      return 0;
+    }
+    case 'flat': {
+      const [state] = rest.filter((a) => !a.startsWith('-'));
+      if (state === undefined) {
+        io.out(`Flat sidebar: ${readOptions(paths).flat ? 'on' : 'off'}\n`);
+        return 0;
+      }
+      if (state !== 'on' && state !== 'off') {
+        io.err('Usage: baton desktop flat [on|off]\n');
+        return 2;
+      }
+      writeOptions(paths, { flatSidebar: state === 'on' });
+      const run = sync(paths, config.home, now(), false);
+      const done = !run.busy && run.result ? (state === 'on' ? run.result.detached : run.result.attached) : 0;
+      io.out(
+        state === 'on'
+          ? `Flat sidebar is on: sessions are shown at the top level instead of under the session they came from (${done} un-nested now).\n`
+          : `Flat sidebar is off: sessions batonpass un-nested go back under the session they came from (${done} re-nested now).\n`,
+      );
+      io.out(
+        'The account open in Claude changes after you switch account, or after you quit Claude (⌘Q), wait a minute and reopen it.\n' +
+          (existsSync(paths.agent) ? '' : 'The background sync is off, so only this run applied it: `baton desktop enable` keeps it applied.\n'),
+      );
       return 0;
     }
     default:

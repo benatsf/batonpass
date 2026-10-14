@@ -35,6 +35,7 @@ baton desktop status     # account folders and what the next sync would do
 baton desktop enable     # back up the session list, sync once, then every minute
 baton desktop sync       # run one sync now (--dry-run shows it without writing)
 baton desktop disable    # stop the background job
+baton desktop flat on    # sessions at the top level, not nested under their parent
 ```
 
 `enable` copies `claude-code-sessions` to `~/.baton/desktop-sync/backups/<time>/` first, then installs the LaunchAgent `~/Library/LaunchAgents/batonpass.desktop-sync.plist`. `disable` and `baton uninstall` unload and remove it; copies already made stay, and Claude shows them like any other session. `baton doctor` reports whether the sync is on and whether it logged errors (`~/.baton/logs/desktop-sync.err`).
@@ -45,6 +46,20 @@ baton desktop disable    # stop the background job
 - Resuming a session under another account works and is billed to that account. Connectors the new account lacks are reported to the model as unavailable, Remote Control starts a fresh link without the earlier history, and extended thinking written under another organisation cannot be reused, so the first reply rereads the session at extra cost.
 - Deleting a session hides it everywhere but frees no disk space: while another account still lists a session, Claude keeps its transcript instead of deleting it. It stays resumable with `claude --resume <id>`.
 - Opening the same session in two accounts at once makes two Claude processes write to one transcript. Finish in one before continuing in the other.
+
+## A flat sidebar (Claude desktop 2.37 and later)
+
+Claude desktop 2.37 nests a session under the session it came from: side sessions, hand-offs and linked forks. To get the flat list back:
+
+```bash
+baton desktop flat on
+```
+
+Claude has its own flag for a session cut loose from its parent, `lineageDetached` (it sets it when a parent is deleted), and shows such a session at the top level. With flat mode on, every sync sets that flag on each session that has a parent, in every account folder Claude has not loaded, and on the copies it makes. Nothing else in the record changes, the file keeps its modification time, and running sessions and records saved in the last ten minutes wait for a later run. The account open in Claude changes after you switch account, or after you quit Claude (⌘Q), wait a minute and reopen it: with Claude quit, every folder can be changed.
+
+A detached session no longer reports back to the session that started it, and Claude's tools no longer list it in that session's family. For finished sessions that changes nothing.
+
+`baton desktop flat off` removes the flag again, but only from the sessions batonpass detached (listed in `~/.baton/desktop-sync/detached.json`); sessions Claude detached itself stay as they are.
 
 ## Browser tabs and cookies
 

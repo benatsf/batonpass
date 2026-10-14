@@ -2,6 +2,12 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.2
+
+- `baton desktop flat on|off`: Claude desktop 2.37 nests sessions under the session they came from; flat mode sets Claude's own `lineageDetached` flag on each session with a parent, so the sidebar lists them at the top level again. It changes no other field, keeps the file time, waits for running sessions and recent saves, and changes the account open in Claude once you switch or quit Claude. `flat off` re-attaches only the sessions batonpass detached.
+- With Claude quit, the sync also updates the folder Claude had loaded last.
+- Copies no longer carry the per-session state Claude desktop 2.37 added (`pendingSystemReminder`, `interruptedAwaitingPerson`, `lastTurnCutShort`).
+
 ## 0.3.1
 
 - A resumed Claude Code session is told which pages its agent had open in Claude desktop's built-in browser (from its own browser calls, last 14 days, at most 8), because Claude closes those tabs when the account changes and after 30 idle minutes. The SessionStart hook first reads any turn the switch cut short.
