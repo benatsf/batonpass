@@ -55,7 +55,7 @@ Claude desktop 2.37 nests a session under the session it came from: side session
 baton desktop flat on
 ```
 
-Claude has its own flag for a session cut loose from its parent, `lineageDetached` (it sets it when a parent is deleted), and shows such a session at the top level. With flat mode on, every sync sets that flag on each session that has a parent, in every account folder Claude has not loaded, and on the copies it makes. Nothing else in the record changes, the file keeps its modification time, and running sessions and records saved in the last ten minutes wait for a later run. The account open in Claude changes after you switch account, or after you quit Claude (⌘Q), wait a minute and reopen it: with Claude quit, every folder can be changed.
+Claude has its own flag for a session cut loose from its parent, `lineageDetached` (it sets it when a parent is deleted), and shows such a session at the top level. With flat mode on, every sync sets that flag on each session that has a parent, in every account folder (the one Claude has loaded included), and on the copies it makes. Nothing else in the record changes, the file keeps its modification time, and running sessions and records saved in the last ten minutes wait for a later run. Claude reads its session files only when it starts or switches account, so the account open in Claude shows the change after you quit and reopen Claude (⌘Q) or switch account.
 
 A detached session no longer reports back to the session that started it, and Claude's tools no longer list it in that session's family. For finished sessions that changes nothing.
 

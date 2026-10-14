@@ -2,6 +2,10 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.3
+
+- Flat sidebar: the `lineageDetached` flag is now also set in the folder Claude has loaded (idle sessions only), so quitting and reopening Claude right away is enough to see the open account flat. Claude reads its session files only at start-up and account switches; if it saves a session again from memory, a later run sets the flag again.
+
 ## 0.3.2
 
 - `baton desktop flat on|off`: Claude desktop 2.37 nests sessions under the session they came from; flat mode sets Claude's own `lineageDetached` flag on each session with a parent, so the sidebar lists them at the top level again. It changes no other field, keeps the file time, waits for running sessions and recent saves, and changes the account open in Claude once you switch or quit Claude. `flat off` re-attaches only the sessions batonpass detached.
