@@ -297,7 +297,7 @@ test('drops account-looking fields that a later Claude version might add', () =>
   });
 });
 
-test('flat sidebar: a child session is detached in place, keeping its time, in every folder Claude has not loaded', () => {
+test('flat sidebar: a child session is detached in place, keeping its time, in every folder, the loaded one included', () => {
   const { paths } = fixture();
   twoAccounts(paths);
   const parent = session(1);
@@ -309,18 +309,23 @@ test('flat sidebar: a child session is detached in place, keeping its time, in e
     transcript(paths, rec.cliSessionId);
   }
   const plan = planFor(paths, NOW, { flat: true });
-  assert.deepEqual(plan.actions.map((a) => [a.kind, a.folder.account, a.title]).sort(), [['detach', B.account, 'Session 2'], ['detach', B.account, 'Session 3']]);
-  assert.deepEqual(applySync(paths, plan, new Date(NOW)), { created: 0, updated: 0, quarantined: 0, detached: 2, attached: 0, raced: 0 });
+  assert.deepEqual(plan.actions.map((a) => [a.kind, a.folder.account, a.title]).sort(), [
+    ['detach', A.account, 'Session 2'],
+    ['detach', A.account, 'Session 3'],
+    ['detach', B.account, 'Session 2'],
+    ['detach', B.account, 'Session 3'],
+  ]);
+  assert.deepEqual(applySync(paths, plan, new Date(NOW)), { created: 0, updated: 0, quarantined: 0, detached: 4, attached: 0, raced: 0 });
   const file = join(dir(paths, B), `${child.sessionId}.json`);
   assert.deepEqual(read(file), { ...child, lineageDetached: true });
   assert.equal(statSync(file).mtimeMs, NOW - 30 * MIN);
-  assert.equal(read(join(dir(paths, A), `${child.sessionId}.json`)).lineageDetached, undefined, 'the loaded folder is left alone');
+  assert.equal(read(join(dir(paths, A), `${child.sessionId}.json`)).lineageDetached, true, 'the loaded folder gets the flag too, for the next restart');
   assert.equal(read(join(dir(paths, B), `${parent.sessionId}.json`)).lineageDetached, undefined, 'a session without a parent is untouched');
   assert.deepEqual(JSON.parse(readFileSync(paths.detached, 'utf8')), { sessions: [child.sessionId, fork.sessionId].sort() });
   assert.deepEqual(planFor(paths, NOW + MIN, { flat: true }).actions, []);
 });
 
-test('flat sidebar: with Claude quit, the folder it had loaded is detached too; recent saves and busy sessions wait', () => {
+test('flat sidebar: recent saves and busy sessions wait, in the loaded folder as everywhere', () => {
   const { paths } = fixture();
   twoAccounts(paths);
   const child = session(1, { spawnedFrom: { sessionId: 'local_parent' } });
@@ -332,8 +337,10 @@ test('flat sidebar: with Claude quit, the folder it had loaded is detached too; 
   transcript(paths, child.cliSessionId);
   transcript(paths, recent.cliSessionId);
   transcript(paths, busy.cliSessionId, NOW - 10_000);
-  const plan = planFor(paths, NOW, { flat: true, running: false });
-  assert.deepEqual(plan.actions.filter((a) => a.kind === 'detach').map((a) => [a.folder.account, a.title]), [[A.account, 'Session 1']]);
+  for (const running of [true, false]) {
+    const plan = planFor(paths, NOW, { flat: true, running });
+    assert.deepEqual(plan.actions.filter((a) => a.kind === 'detach').map((a) => [a.folder.account, a.title]), [[A.account, 'Session 1']]);
+  }
 });
 
 test('flat sidebar: copies made for another account arrive detached', () => {
@@ -343,7 +350,7 @@ test('flat sidebar: copies made for another account arrive detached', () => {
   record(paths, A, child, NOW - 30 * MIN);
   transcript(paths, child.cliSessionId);
   const plan = planFor(paths, NOW, { flat: true });
-  assert.deepEqual(plan.actions.map((a) => [a.kind, a.folder.account]), [['create', B.account]]);
+  assert.deepEqual(plan.actions.map((a) => [a.kind, a.folder.account]), [['create', B.account], ['detach', A.account]]);
   applySync(paths, plan, new Date(NOW));
   assert.equal(read(join(dir(paths, B), `${child.sessionId}.json`)).lineageDetached, true);
   assert.deepEqual(JSON.parse(readFileSync(paths.detached, 'utf8')), { sessions: [child.sessionId] });
@@ -361,16 +368,19 @@ test('turning flat off re-attaches only what batonpass detached, then forgets it
   }
   mkdirSync(paths.work, { recursive: true });
   writeFileSync(paths.detached, JSON.stringify({ sessions: [ours.sessionId] }));
-  const loadedPlan = planFor(paths, NOW, { detached: new Set([ours.sessionId]) });
-  assert.deepEqual(loadedPlan.actions.map((a) => [a.kind, a.folder.account, a.title]), [['attach', B.account, 'Session 1']]);
-  assert.deepEqual(loadedPlan.reattached, [], 'A still holds a detached copy');
-  applySync(paths, loadedPlan, new Date(NOW));
+  // A was saved a moment ago: it waits, so batonpass keeps remembering the session.
+  utimesSync(join(dir(paths, A), `${ours.sessionId}.json`), new Date(NOW - MIN), new Date(NOW - MIN));
+  const first = planFor(paths, NOW, { detached: new Set([ours.sessionId]) });
+  // A is now the newest copy, so B is brought up to date from it, without the flag.
+  assert.deepEqual(first.actions.map((a) => [a.kind, a.folder.account, a.title]), [['update', B.account, 'Session 1']]);
+  assert.deepEqual(first.reattached, [], 'A still holds a detached copy');
+  applySync(paths, first, new Date(NOW));
   assert.equal(read(join(dir(paths, B), `${ours.sessionId}.json`)).lineageDetached, undefined);
   assert.equal(read(join(dir(paths, B), `${claudes.sessionId}.json`)).lineageDetached, true, "Claude's own detach is kept");
-  const quit = planFor(paths, NOW, { detached: new Set([ours.sessionId]), running: false });
-  assert.deepEqual(quit.actions.map((a) => [a.kind, a.folder.account]), [['attach', A.account]]);
-  assert.deepEqual(quit.reattached, [ours.sessionId]);
-  applySync(paths, quit, new Date(NOW));
+  const later = planFor(paths, NOW + 20 * MIN, { detached: new Set([ours.sessionId]) });
+  assert.deepEqual(later.actions.map((a) => [a.kind, a.folder.account]), [['attach', A.account]]);
+  assert.deepEqual(later.reattached, [ours.sessionId]);
+  applySync(paths, later, new Date(NOW + 20 * MIN));
   assert.deepEqual(JSON.parse(readFileSync(paths.detached, 'utf8')), { sessions: [] });
 });
 

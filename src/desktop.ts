@@ -380,12 +380,15 @@ export function planSync(paths: DesktopPaths, now: number, options: SyncOptions 
     if (!reason && busy) plan.skipped.push({ sessionId, title, reason: 'in use; copied once idle for a minute' });
     else if (!reason && worktreeGone) plan.skipped.push({ sessionId, title, reason: 'worktree no longer exists' });
 
-    // Flat sidebar: detach (or, after `flat off`, re-attach) each copy in place, keeping its time.
+    // Flat sidebar: detach (or, after `flat off`, re-attach) each copy in place, keeping its time. This
+    // one flag is also set in the folder Claude has loaded: Claude reads the folder only when it starts
+    // or switches account, so the change shows at the next restart, and an idle record is not saved
+    // again from memory. If Claude does save it, its version wins and a later run sets the flag again.
     let stillDetached = false;
     for (const copy of copies) {
       const want = shaped(copy.record, options);
       if (want === copy.record) continue;
-      if (planned.has(copy.folder.path) || busy || loaded(layout, copy.folder) || now - copy.mtimeMs < RECENT_SAVE_MS) {
+      if (planned.has(copy.folder.path) || busy || now - copy.mtimeMs < RECENT_SAVE_MS) {
         stillDetached ||= !options.flat;
         continue;
       }
