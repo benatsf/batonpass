@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeSync } from 'node:fs';
+import { closeSync, constants, cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +21,10 @@ export interface DesktopPaths {
   projects: string;
   agent: string;
   work: string;
+  /** `{ "flatSidebar": true }` while sessions are shown flat (`baton desktop flat on`). */
+  options: string;
+  /** Sessions batonpass detached from their parent, so `flat off` can attach them again. */
+  detached: string;
 }
 
 export interface Folder {
@@ -34,10 +39,12 @@ export interface Layout {
   active: Folder | null;
   /** Claude switched account a moment ago: wait for it to settle. */
   settling: boolean;
+  /** With Claude quit, no folder is held in memory and every one can be changed. */
+  running: boolean;
 }
 
 export type Action =
-  | { kind: 'create' | 'update'; folder: Folder; sessionId: string; title: string; record: Record<string, unknown>; mtimeMs: number; expectMtimeMs?: number }
+  | { kind: 'create' | 'update' | 'detach' | 'attach'; folder: Folder; sessionId: string; title: string; record: Record<string, unknown>; mtimeMs: number; expectMtimeMs?: number; detaches?: boolean }
   | { kind: 'quarantine'; folder: Folder; sessionId: string; title: string; file: string; expectMtimeMs: number; tombstones: string[]; stamp: number };
 
 export interface Skip {
@@ -51,13 +58,25 @@ export interface SyncPlan {
   sessions: number;
   actions: Action[];
   skipped: Skip[];
+  /** Sessions batonpass no longer needs to remember as detached (flat sidebar turned off and undone). */
+  reattached: string[];
 }
 
 export interface SyncResult {
   created: number;
   updated: number;
   quarantined: number;
+  detached: number;
+  attached: number;
   raced: number;
+}
+
+export interface SyncOptions {
+  /** Show every session at the top level instead of nested under the session it came from. */
+  flat: boolean;
+  /** Sessions batonpass detached earlier. */
+  detached: Set<string>;
+  running: boolean;
 }
 
 export const AGENT_LABEL = 'batonpass.desktop-sync';
@@ -78,6 +97,7 @@ const ACCOUNT_FIELDS = new Set([
   'scheduledTaskId', 'scheduledRunContinued', 'spaceId', 'movedToCloud', 'envScopeId',
   'startedFromEnvironmentId', 'cloudSpawnedTasks', 'publishedArtifacts', 'emailAddress',
   'isRunning', 'armedWorkAtQuit', 'interruptedByQuitAt', 'interruptedUnseenResume', 'pendingFirstStart',
+  'interruptedAwaitingPerson', 'lastTurnCutShort', 'pendingSystemReminder',
   // When present, deleting the session also deletes its transcript.
   'importedFrom',
 ]);
@@ -93,6 +113,8 @@ export function desktopPaths(env: NodeJS.ProcessEnv, batonHome: string, claudePr
     projects: claudeProjects,
     agent: join(home, 'Library', 'LaunchAgents', `${AGENT_LABEL}.plist`),
     work: join(batonHome, 'desktop-sync'),
+    options: join(batonHome, 'desktop-sync', 'options.json'),
+    detached: join(batonHome, 'desktop-sync', 'detached.json'),
   };
 }
 
@@ -157,7 +179,7 @@ const recordFiles = (folder: Folder) => {
  * Which account folders are real: those holding sessions, or that Claude loaded and kept for more
  * than a moment. A switch can briefly pair the new org with the old account; that folder is skipped.
  */
-export function discover(paths: DesktopPaths, now: number): Layout {
+export function discover(paths: DesktopPaths, now: number, running = true): Layout {
   const inits = readInits(paths.logs);
   const settled = new Set<string>();
   inits.forEach((init, i) => {
@@ -173,7 +195,7 @@ export function discover(paths: DesktopPaths, now: number): Layout {
   }
   const last = inits.at(-1);
   const active = last ? (folders.find((f) => f.account === last.account && f.org === last.org) ?? null) : null;
-  return { folders, active, settling: Boolean(last && now - last.at < SETTLE_MS) };
+  return { folders, active, settling: Boolean(last && now - last.at < SETTLE_MS), running };
 }
 
 interface Copy {
@@ -233,8 +255,33 @@ function transcripts(projects: string): Map<string, number> {
 }
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
-/** The folder Claude has loaded is only added to. When the log does not say which one it is, none is changed. */
-const loaded = (layout: Layout, f: Folder) => (layout.active ? layout.active.account === f.account && layout.active.org === f.org : true);
+/**
+ * The folder Claude has loaded is only added to. When the log does not say which one it is, none is
+ * changed. With Claude quit, nothing is loaded.
+ */
+const loaded = (layout: Layout, f: Folder) =>
+  layout.running && (layout.active ? layout.active.account === f.account && layout.active.org === f.org : true);
+
+/** The session this one was started from or forked from, which Claude desktop 2.37+ nests it under. */
+function parentOf(record: Record<string, unknown>): string | null {
+  const spawned = record.spawnedFrom as { sessionId?: unknown } | undefined;
+  const parent = typeof spawned?.sessionId === 'string' ? spawned.sessionId : record.forkedFromSessionId;
+  return typeof parent === 'string' && parent !== record.sessionId ? parent : null;
+}
+
+/**
+ * `lineageDetached` is Claude's own flag for a session cut loose from its parent (it sets it when a
+ * parent is deleted): the session then shows at the top level. Flat mode sets it on every child;
+ * turning flat mode off removes it again from the sessions batonpass detached.
+ */
+function shaped(record: Record<string, unknown>, options: SyncOptions): Record<string, unknown> {
+  if (options.flat) return parentOf(record) && record.lineageDetached !== true ? { ...record, lineageDetached: true } : record;
+  if (record.lineageDetached === true && options.detached.has(String(record.sessionId))) {
+    const { lineageDetached: _, ...rest } = record;
+    return rest;
+  }
+  return record;
+}
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 function ineligible(record: Record<string, unknown>, known: Map<string, number>): string | null {
@@ -245,10 +292,31 @@ function ineligible(record: Record<string, unknown>, known: Map<string, number>)
   return null;
 }
 
-export function planSync(paths: DesktopPaths, now: number): SyncPlan {
-  const layout = discover(paths, now);
-  const plan: SyncPlan = { layout, sessions: 0, actions: [], skipped: [] };
-  if (layout.settling || layout.folders.length < 2) return plan;
+const readJson = (file: string): unknown => {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+const readDetached = (paths: DesktopPaths) => new Set(strings((readJson(paths.detached) as { sessions?: unknown } | null)?.sessions));
+
+export function readOptions(paths: DesktopPaths): SyncOptions {
+  const options = readJson(paths.options) as { flatSidebar?: unknown } | null;
+  return { flat: options?.flatSidebar === true, detached: readDetached(paths), running: claudeRunning() };
+}
+
+export function claudeRunning(): boolean {
+  const ps = spawnSync('ps', ['-axo', 'comm'], { encoding: 'utf8' });
+  // If ps fails, assume Claude runs: that only makes the sync more careful.
+  return ps.status !== 0 || ps.stdout.split('\n').some((line) => line.trim().endsWith('/Claude.app/Contents/MacOS/Claude'));
+}
+
+export function planSync(paths: DesktopPaths, now: number, options: SyncOptions = readOptions(paths)): SyncPlan {
+  const layout = discover(paths, now, options.running);
+  const plan: SyncPlan = { layout, sessions: 0, actions: [], skipped: [], reattached: [] };
+  if (layout.settling) return plan;
   const known = transcripts(paths.projects);
   const graves = new Map(layout.folders.map((f) => [f.path, tombstones(f)]));
   const groups = new Map<string, Copy[]>();
@@ -281,32 +349,50 @@ export function planSync(paths: DesktopPaths, now: number): SyncPlan {
       continue;
     }
 
+    const cli = typeof newest.record.cliSessionId === 'string' ? known.get(newest.record.cliSessionId) : undefined;
+    const busy = cli !== undefined && now - cli < BUSY_MS;
+    const planned = new Set<string>();
     const reason = ineligible(newest.record, known);
-    if (reason) {
-      plan.skipped.push({ sessionId, title, reason });
-      continue;
-    }
-    const busy = now - known.get(newest.record.cliSessionId as string)! < BUSY_MS;
+    if (reason) plan.skipped.push({ sessionId, title, reason });
     const worktree = newest.record.worktreePath;
     const worktreeGone = typeof worktree === 'string' && worktree !== '' && !existsSync(worktree);
-    const shared = portable(newest.record);
-    for (const folder of layout.folders) {
+    const base = portable(newest.record);
+    const shared = shaped(base, options);
+    // Only flags batonpass sets are remembered: Claude detaches a session itself when its parent is deleted.
+    const sharedDetaches = options.flat && shared !== base;
+    for (const folder of reason ? [] : layout.folders) {
       if (folder.path === newest.folder.path) continue;
       const existing = copies.find((c) => c.folder.path === folder.path);
       if (!existing) {
         if (busy || worktreeGone) continue;
-        plan.actions.push({ kind: 'create', folder, sessionId, title, record: shared, mtimeMs: newest.mtimeMs });
+        plan.actions.push({ kind: 'create', folder, sessionId, title, record: shared, mtimeMs: newest.mtimeMs, detaches: sharedDetaches });
         continue;
       }
       if (existing.mtimeMs >= newest.mtimeMs || loaded(layout, folder)) continue;
       if (now - existing.mtimeMs < RECENT_SAVE_MS) continue;
       const own = Object.fromEntries(Object.entries(existing.record).filter(([key]) => isAccountField(key)));
-      const merged = { ...shared, ...own };
+      const merged = shaped({ ...shared, ...own }, options);
       if (sameJson(merged, existing.record)) continue;
-      plan.actions.push({ kind: 'update', folder, sessionId, title, record: merged, mtimeMs: newest.mtimeMs, expectMtimeMs: existing.mtimeMs });
+      planned.add(folder.path);
+      const detaches = sharedDetaches || (options.flat && merged.lineageDetached === true && existing.record.lineageDetached !== true);
+      plan.actions.push({ kind: 'update', folder, sessionId, title, record: merged, mtimeMs: newest.mtimeMs, expectMtimeMs: existing.mtimeMs, detaches });
     }
-    if (busy) plan.skipped.push({ sessionId, title, reason: 'in use; copied once idle for a minute' });
-    else if (worktreeGone) plan.skipped.push({ sessionId, title, reason: 'worktree no longer exists' });
+    if (!reason && busy) plan.skipped.push({ sessionId, title, reason: 'in use; copied once idle for a minute' });
+    else if (!reason && worktreeGone) plan.skipped.push({ sessionId, title, reason: 'worktree no longer exists' });
+
+    // Flat sidebar: detach (or, after `flat off`, re-attach) each copy in place, keeping its time.
+    let stillDetached = false;
+    for (const copy of copies) {
+      const want = shaped(copy.record, options);
+      if (want === copy.record) continue;
+      if (planned.has(copy.folder.path) || busy || loaded(layout, copy.folder) || now - copy.mtimeMs < RECENT_SAVE_MS) {
+        stillDetached ||= !options.flat;
+        continue;
+      }
+      const kind = options.flat ? 'detach' : 'attach';
+      plan.actions.push({ kind, folder: copy.folder, sessionId, title, record: want, mtimeMs: copy.mtimeMs, expectMtimeMs: copy.mtimeMs });
+    }
+    if (!options.flat && options.detached.has(sessionId) && !stillDetached) plan.reattached.push(sessionId);
   }
   return plan;
 }
@@ -316,7 +402,7 @@ function assertRealDir(path: string): void {
 }
 
 /** Write next to the target and rename into place, so Claude never reads a partial record. */
-function writeRecord(action: Extract<Action, { kind: 'create' | 'update' }>): boolean {
+function writeRecord(action: Exclude<Action, { kind: 'quarantine' }>): boolean {
   assertRealDir(action.folder.path);
   const target = join(action.folder.path, `${action.sessionId}.json`);
   const tmp = join(action.folder.path, `.baton-${randomBytes(6).toString('hex')}.partial`);
@@ -356,16 +442,33 @@ function quarantine(action: Extract<Action, { kind: 'quarantine' }>, work: strin
 }
 
 export function applySync(paths: DesktopPaths, plan: SyncPlan, now: Date): SyncResult {
-  const result: SyncResult = { created: 0, updated: 0, quarantined: 0, raced: 0 };
+  const result: SyncResult = { created: 0, updated: 0, quarantined: 0, detached: 0, attached: 0, raced: 0 };
   const stamp = now.toISOString().replace(/[:.]/g, '-');
+  const detached = readDetached(paths);
   for (const action of plan.actions) {
     const done = action.kind === 'quarantine' ? quarantine(action, paths.work, stamp) : writeRecord(action);
-    if (!done) result.raced++;
-    else if (action.kind === 'create') result.created++;
+    if (!done) {
+      result.raced++;
+      continue;
+    }
+    if (action.kind === 'create') result.created++;
     else if (action.kind === 'update') result.updated++;
-    else result.quarantined++;
+    else if (action.kind === 'quarantine') result.quarantined++;
+    else if (action.kind === 'detach') result.detached++;
+    else result.attached++;
+    if (action.kind === 'detach' || (action.kind !== 'quarantine' && action.detaches)) detached.add(action.sessionId);
+  }
+  for (const id of plan.reattached) detached.delete(id);
+  if (result.detached || result.created || result.updated || plan.reattached.length) {
+    mkdirSync(paths.work, { recursive: true, mode: 0o700 });
+    writeFileSync(paths.detached, `${JSON.stringify({ sessions: [...detached].sort() }, null, 2)}\n`, { mode: 0o600 });
   }
   return result;
+}
+
+export function writeOptions(paths: DesktopPaths, options: { flatSidebar: boolean }): void {
+  mkdirSync(paths.work, { recursive: true, mode: 0o700 });
+  writeFileSync(paths.options, `${JSON.stringify(options, null, 2)}\n`, { mode: 0o600 });
 }
 
 /** A full copy of the session store, taken before the first sync. */
