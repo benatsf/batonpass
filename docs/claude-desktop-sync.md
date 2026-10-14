@@ -39,6 +39,8 @@ baton desktop flat on    # sessions at the top level, not nested under their par
 baton desktop purge      # list deleted sessions' leftover files; --yes removes them
 ```
 
+A command run by hand waits for a background sync that is still running, up to three minutes.
+
 `enable` copies `claude-code-sessions` to `~/.baton/desktop-sync/backups/<time>/` first, then installs the LaunchAgent `~/Library/LaunchAgents/batonpass.desktop-sync.plist`. `disable` and `baton uninstall` unload and remove it; copies already made stay, and Claude shows them like any other session. `baton doctor` reports whether the sync is on and whether it logged errors (`~/.baton/logs/desktop-sync.err`).
 
 ## What to expect

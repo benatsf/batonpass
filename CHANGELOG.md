@@ -2,6 +2,11 @@
 
 All notable changes follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.5
+
+- The background sync reads only the lines Claude added to its log since the last run, instead of the whole 10–20 MB every minute. On a Mac short of memory the full read made each run take over a minute.
+- `baton desktop purge`, `sync`, `enable` and `flat` wait for a running background sync (up to 3 minutes) instead of stopping with "A sync is running".
+
 ## 0.3.4
 
 - `baton desktop purge [--yes]`: lists, then with `--yes` removes, the conversation files of sessions deleted in Claude desktop that no account lists any more (Claude keeps them while another account's copy claims them). Running sessions and files written in the last ten minutes wait; nothing outside `~/.claude/projects` and batonpass's quarantine is touched.
