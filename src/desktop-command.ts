@@ -8,6 +8,7 @@ import { appendLog } from './context.ts';
 import { agentPlist, AGENT_LABEL, applySync, backupStore, desktopPaths, planSync, readOptions, writeOptions, type DesktopPaths, type Folder, type SyncPlan } from './desktop.ts';
 import { installPaths } from './install.ts';
 import { tryLock } from './lock.ts';
+import { applyPurge, planPurge } from './desktop-purge.ts';
 
 const USAGE = `Usage: baton desktop <command>
 
@@ -20,6 +21,8 @@ Commands:
   disable              Stop the background sync (copies already made stay)
   flat [on|off]        Show every session at the top level of the sidebar, not nested under
                        the session it came from (Claude desktop 2.37 and later)
+  purge [--yes]        Remove the conversation files of sessions deleted in Claude (lists them
+                       first; --yes removes them for good)
 `;
 
 const short = (f: Folder) => `${f.account.slice(0, 8)}…/${f.org.slice(0, 8)}…`;
@@ -93,7 +96,7 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
     io.out(USAGE);
     return 0;
   }
-  const { values } = parseArgs({ args: rest, options: { 'dry-run': { type: 'boolean' }, quiet: { type: 'boolean' } }, allowPositionals: sub === 'flat' });
+  const { values } = parseArgs({ args: rest, options: { 'dry-run': { type: 'boolean' }, quiet: { type: 'boolean' }, yes: { type: 'boolean' } }, allowPositionals: sub === 'flat' });
   if (process.platform !== 'darwin') {
     io.err('baton desktop works with the Claude desktop app on macOS only.\n');
     return 1;
@@ -185,6 +188,34 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
           (existsSync(paths.agent) ? '' : 'The background sync is off, so only this run applied it: `baton desktop enable` keeps it applied.\n'),
       );
       return 0;
+    }
+    case 'purge': {
+      const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      const lock = tryLock(join(config.home, 'locks', 'desktop-sync.lock'));
+      if (!lock) {
+        io.out('A sync is running; try again in a moment.\n');
+        return 0;
+      }
+      try {
+        const plan = planPurge(paths, now().getTime());
+        for (const s of plan.skipped) io.out(`  wait  ${s.title} (${s.reason})\n`);
+        if (!plan.items.length) {
+          io.out('No deleted session has conversation files left to remove.\n');
+          return 0;
+        }
+        if (!values.yes) {
+          io.out(`These ${plan.items.length} sessions were deleted in Claude and no account lists them any more; their conversation files take ${mb(plan.bytes)}:\n`);
+          for (const item of plan.items) io.out(`  ${item.title} (${mb(item.bytes)})\n`);
+          io.out('Nothing was removed. `baton desktop purge --yes` removes them for good: they can no longer be resumed or searched.\n');
+          return 0;
+        }
+        const done = applyPurge(paths, plan);
+        appendLog(config.home, 'desktop-purge', { removed: done.removed, bytes: done.bytes });
+        io.out(`Removed the conversation files of ${done.removed} deleted sessions (${mb(done.bytes)}).\n`);
+        return 0;
+      } finally {
+        lock.release();
+      }
     }
     default:
       io.err(`Unknown desktop command: ${sub}\n\n${USAGE}`);
