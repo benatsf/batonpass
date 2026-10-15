@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureIO, main } from '../src/cli.ts';
 import { ensureHome } from '../src/config.ts';
-import { agentPlist, AGENT_LABEL, applySync, desktopPaths, planSync, portable, type DesktopPaths, type SyncOptions } from '../src/desktop.ts';
+import { agentPlist, AGENT_LABEL, applySync, desktopPaths, planSync, portable, readInits, type DesktopPaths, type SyncOptions } from '../src/desktop.ts';
+import { tryLock } from '../src/lock.ts';
 
 type Pair = { account: string; org: string };
 const A: Pair = { account: 'aaaaaaaa-0000-4000-8000-000000000001', org: 'aaaaaaaa-0000-4000-8000-0000000000a1' };
@@ -450,3 +451,45 @@ test('baton desktop enable backs up, syncs once and loads the agent, reloads it 
   assert.equal(existsSync(paths.agent), false);
   assert.deepEqual(calls.at(-1), ['launchctl', 'bootout', `gui/${process.getuid!()}/${AGENT_LABEL}`]);
 });
+
+test('reads only the log lines Claude added since the last run, across a log rotation', () => {
+  const { paths } = fixture();
+  const [old, current] = paths.logs as [string, string];
+  const line = (at: number, p: Pair) => `${stamp(at)} [info] [LocalSessionManager] Initialization succeeded — accountId=${p.account}, orgId=${p.org}, existingSessions=0\n`;
+  const pairs = (inits: Array<{ account: string }>) => inits.map((i) => i.account.slice(0, 1)).join('');
+  mkdirSync(join(current, '..'), { recursive: true });
+  writeFileSync(current, `${stamp(NOW - 90 * MIN)} [info] début ✓\n${line(NOW - 60 * MIN, A)}`);
+  assert.equal(pairs(readInits(paths.logs, paths.logMarks)), 'a');
+
+  // A load half written is reported but read again next time; the earlier lines are not read again.
+  appendFileSync(current, line(NOW - 40 * MIN, B).slice(0, -1));
+  assert.equal(pairs(readInits(paths.logs, paths.logMarks)), 'ab');
+  appendFileSync(current, `\n${line(NOW - 30 * MIN, C)}`);
+  assert.equal(pairs(readInits(paths.logs, paths.logMarks)), 'abc');
+
+  // Claude rotates main.log to main1.log and starts a new one.
+  renameSync(current, old);
+  writeFileSync(current, line(NOW - 10 * MIN, A));
+  assert.equal(pairs(readInits(paths.logs, paths.logMarks)), 'abca');
+  assert.equal(pairs(readInits(paths.logs)), 'abca', 'the same loads as a full read');
+
+  // A log rewritten in place is read again in full.
+  writeFileSync(old, `${stamp(NOW - 90 * MIN)} [info] début ✓\n${line(NOW - 50 * MIN, C)}${line(NOW - 45 * MIN, C)}${line(NOW - 30 * MIN, C)}`);
+  assert.equal(pairs(readInits(paths.logs, paths.logMarks)), 'ccca');
+});
+
+test('a command run by hand waits for the background sync instead of giving up', { skip: process.platform !== 'darwin' }, async () => {
+  const { root, home } = fixture();
+  const lock = tryLock(join(home, 'locks', 'desktop-sync.lock'))!;
+  setTimeout(() => lock.release(), 700);
+  const io = captureIO({ env: { HOME: root, BATON_HOME: home } });
+  assert.equal(await main(['desktop', 'purge'], io), 0);
+  assert.match(io.stdout.join(''), /Waiting for the background sync to finish…\nNo deleted session/);
+
+  const held = tryLock(join(home, 'locks', 'desktop-sync.lock'))!;
+  const quiet = captureIO({ env: { HOME: root, BATON_HOME: home } });
+  assert.equal(await main(['desktop', 'sync', '--quiet'], quiet), 0, 'the background job does not wait');
+  assert.deepEqual(quiet.stdout, []);
+  held.release();
+});
+

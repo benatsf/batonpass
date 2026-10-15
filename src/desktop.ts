@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,6 +27,8 @@ export interface DesktopPaths {
   detached: string;
   /** Claude Code's `<pid>.json` files for running sessions. */
   liveSessions: string;
+  /** How far each log file was read, so a sync reads only the lines Claude added since. */
+  logMarks: string;
 }
 
 export interface Folder {
@@ -118,6 +120,7 @@ export function desktopPaths(env: NodeJS.ProcessEnv, batonHome: string, claudePr
     options: join(batonHome, 'desktop-sync', 'options.json'),
     detached: join(batonHome, 'desktop-sync', 'detached.json'),
     liveSessions: join(home, '.claude', 'sessions'),
+    logMarks: join(batonHome, 'desktop-sync', 'log-marks.json'),
   };
 }
 
@@ -151,22 +154,99 @@ interface Init {
   org: string;
 }
 
-export function readInits(logs: string[]): Init[] {
+const NEEDLE = Buffer.from('Initialization succeeded');
+/** Bytes before a mark that must be unchanged for the mark to apply: guards against a log rewritten in place. */
+const MARK_TAIL = 256;
+
+/** Where a log file was read up to (just after a newline) and the loads found before that point. */
+interface LogMark {
+  ino: number;
+  offset: number;
+  tail: string;
+  inits: Init[];
+}
+
+function readRange(path: string, from: number, to: number): Buffer | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY);
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(Math.max(0, to - from));
+    let got = 0;
+    while (got < buf.length) {
+      const n = readSync(fd, buf, got, buf.length - got, from + got);
+      if (!n) break;
+      got += n;
+    }
+    return buf.subarray(0, got);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function scanInits(buf: Buffer, into: Init[]): void {
+  for (let start = buf.indexOf(NEEDLE); start !== -1; start = buf.indexOf(NEEDLE, start + 1)) {
+    const from = buf.lastIndexOf(0x0a, start) + 1;
+    const to = buf.indexOf(0x0a, start);
+    const match = INIT.exec(buf.toString('utf8', from, to === -1 ? buf.length : to));
+    if (match) into.push({ at: new Date(`${match[1]}T${match[2]}`).getTime(), account: match[3]!, org: match[4]! });
+  }
+}
+
+function readMarks(file: string): LogMark[] {
+  try {
+    const marks = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    return Array.isArray(marks) ? (marks as LogMark[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeMarks(file: string, marks: LogMark[]): void {
+  try {
+    mkdirSync(join(file, '..'), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(marks));
+    renameSync(tmp, file);
+  } catch {
+    // Only an optimisation: the next run reads the logs in full.
+  }
+}
+
+/**
+ * Claude's sidebar loads, from its main log. With `marksFile`, each file is read only from where
+ * the previous run stopped; marks follow a file by inode, so they survive Claude's log rotation.
+ */
+export function readInits(logs: string[], marksFile?: string): Init[] {
+  const known = marksFile ? readMarks(marksFile) : [];
+  const marks: LogMark[] = [];
   const inits: Init[] = [];
   for (const path of logs) {
-    let text: string;
+    let size: number;
+    let ino: number;
     try {
-      text = readFileSync(path, 'utf8');
+      ({ size, ino } = statSync(path));
     } catch {
       continue;
     }
-    for (let start = text.indexOf('Initialization succeeded'); start !== -1; start = text.indexOf('Initialization succeeded', start + 1)) {
-      const from = text.lastIndexOf('\n', start) + 1;
-      const to = text.indexOf('\n', start);
-      const match = INIT.exec(text.slice(from, to === -1 ? undefined : to));
-      if (match) inits.push({ at: new Date(`${match[1]}T${match[2]}`).getTime(), account: match[3]!, org: match[4]! });
-    }
+    const mark = known.find((m) => m.ino === ino && m.offset <= size);
+    const tail = mark ? readRange(path, Math.max(0, mark.offset - MARK_TAIL), mark.offset)?.toString('latin1') : undefined;
+    const start = mark && tail === mark.tail ? mark.offset : 0;
+    const found = start ? [...mark!.inits] : [];
+    const buf = readRange(path, start, size);
+    if (!buf) continue;
+    // Complete lines are remembered; a line still being written is read again next time.
+    const end = buf.lastIndexOf(0x0a) + 1;
+    scanInits(buf.subarray(0, end), found);
+    const offset = start + end;
+    marks.push({ ino, offset, tail: readRange(path, Math.max(0, offset - MARK_TAIL), offset)?.toString('latin1') ?? '', inits: found });
+    inits.push(...found);
+    scanInits(buf.subarray(end), inits);
   }
+  if (marksFile) writeMarks(marksFile, marks);
   return inits.sort((a, b) => a.at - b.at);
 }
 
@@ -183,7 +263,7 @@ const recordFiles = (folder: Folder) => {
  * than a moment. A switch can briefly pair the new org with the old account; that folder is skipped.
  */
 export function discover(paths: DesktopPaths, now: number, running = true): Layout {
-  const inits = readInits(paths.logs);
+  const inits = readInits(paths.logs, paths.logMarks);
   const settled = new Set<string>();
   inits.forEach((init, i) => {
     const next = inits[i + 1];

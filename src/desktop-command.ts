@@ -7,7 +7,7 @@ import { ensureHome, loadConfig } from './config.ts';
 import { appendLog } from './context.ts';
 import { agentPlist, AGENT_LABEL, applySync, backupStore, desktopPaths, planSync, readOptions, writeOptions, type DesktopPaths, type Folder, type SyncPlan } from './desktop.ts';
 import { installPaths } from './install.ts';
-import { tryLock } from './lock.ts';
+import { tryLock, type Lock } from './lock.ts';
 import { applyPurge, planPurge } from './desktop-purge.ts';
 
 const USAGE = `Usage: baton desktop <command>
@@ -65,8 +65,26 @@ export async function stopAgent(paths: DesktopPaths, io: CliIO): Promise<boolean
 
 type Run = { busy: true } | { busy: false; plan: SyncPlan; result?: ReturnType<typeof applySync> };
 
-function sync(paths: DesktopPaths, home: string, now: Date, dryRun: boolean): Run {
-  const lock = tryLock(join(home, 'locks', 'desktop-sync.lock'));
+const LOCK_WAIT_MS = 3 * 60_000;
+
+/**
+ * The background sync holds the lock while it runs, which can take a minute or more when the Mac is
+ * short of memory. A command run by hand waits for it; the background job itself never waits.
+ */
+async function takeLock(home: string, io: CliIO, wait: boolean): Promise<Lock | null> {
+  const path = join(home, 'locks', 'desktop-sync.lock');
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let told = false;
+  for (;;) {
+    const lock = tryLock(path);
+    if (lock || !wait || Date.now() >= deadline) return lock;
+    if (!told) io.out('Waiting for the background sync to finish…\n');
+    told = true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+function sync(paths: DesktopPaths, home: string, now: Date, dryRun: boolean, lock: Lock | null): Run {
   if (!lock) return { busy: true };
   try {
     const plan = planSync(paths, now.getTime());
@@ -117,9 +135,10 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
       return 0;
     }
     case 'sync': {
-      const run = sync(paths, config.home, now(), Boolean(values['dry-run']));
+      const lock = await takeLock(config.home, io, !values.quiet);
+      const run = sync(paths, config.home, now(), Boolean(values['dry-run']), lock);
       if (run.busy) {
-        if (!values.quiet) io.out('Another sync is running; try again in a moment.\n');
+        if (!values.quiet) io.out('The background sync is still running after 3 minutes; try again later.\n');
         return 0;
       }
       if (values.quiet) return 0;
@@ -148,7 +167,7 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
       }
       const backup = backupStore(paths, now());
       io.out(`Backed up the session list to ${backup}\n`);
-      const run = sync(paths, config.home, now(), false);
+      const run = sync(paths, config.home, now(), false, await takeLock(config.home, io, true));
       if (!run.busy && run.result) io.out(`First sync: copied ${run.result.created}, updated ${run.result.updated}, hid ${run.result.quarantined}.\n`);
       if (!(await startAgent(paths, io, launcher, config.home))) {
         io.err(`launchctl could not load ${paths.agent}.\n`);
@@ -176,7 +195,7 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
         return 2;
       }
       writeOptions(paths, { flatSidebar: state === 'on' });
-      const run = sync(paths, config.home, now(), false);
+      const run = sync(paths, config.home, now(), false, await takeLock(config.home, io, true));
       const done = !run.busy && run.result ? (state === 'on' ? run.result.detached : run.result.attached) : 0;
       io.out(
         state === 'on'
@@ -191,9 +210,9 @@ export async function desktopCommand(args: string[], io: CliIO, now: () => Date 
     }
     case 'purge': {
       const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-      const lock = tryLock(join(config.home, 'locks', 'desktop-sync.lock'));
+      const lock = await takeLock(config.home, io, true);
       if (!lock) {
-        io.out('A sync is running; try again in a moment.\n');
+        io.out('The background sync is still running after 3 minutes; try again later.\n');
         return 0;
       }
       try {
